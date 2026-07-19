@@ -78,81 +78,46 @@ _ROOT_CSS = """:root {
   --border: %(border)s;
 }""" % PALETTE
 
-_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-%(root)s
-
-html, body,
-.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-[data-testid="stMainBlockContainer"], .main .block-container,
-[data-testid="stSidebar"], [data-testid="stSidebarContent"],
-[data-testid="stBottomBlockContainer"], [data-testid="stHeader"] {
-  background: var(--bg) !important; color: var(--text) !important; font-family: 'IBM Plex Sans', sans-serif;
-}
-.stApp p, .stApp li, .stApp label { font-family: 'IBM Plex Sans', sans-serif; color: var(--text); }
-
-/* Native widgets that paint their own background instead of inheriting it */
-[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section {
-  background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important;
-}
-[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-[data-testid="stTextArea"] textarea {
-  background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important;
-}
-[data-testid="stCheckbox"] label span, [data-testid="stRadio"] label span,
-[data-testid="stWidgetLabel"] p { color: var(--text) !important; }
-[data-testid="stAlert"] { background: var(--surface) !important; color: var(--text) !important; }
-[data-testid="stCaptionContainer"] { color: var(--muted) !important; }
-[data-testid="stMarkdownContainer"] { color: var(--text); }
-/* Never touch bare <span> font-family -- Streamlit renders its own icon
-   glyphs (expander chevrons, spinner icons) as ligature text inside plain
-   <span> elements via a Material Symbols font; overriding it site-wide
-   breaks the ligature and the literal icon name shows up as text. */
-
-.stApp h1, .stApp h2, .stApp h3 {
-  font-family: 'Archivo Narrow', sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 700;
-  color: var(--ink);
-}
-.stApp h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3em; margin-top: 1.6em; }
-
-[data-testid="stMetric"] {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem;
-}
-[data-testid="stMetricLabel"] { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--muted); }
-[data-testid="stMetricValue"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }
-
-[data-testid="stExpander"] { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
-/* Explicit text color on the expander's clickable header -- without this it
-   inherited a low-contrast default that was only readable on hover. */
-[data-testid="stExpander"] summary, [data-testid="stExpander"] summary p { color: var(--text) !important; }
-
-[data-testid="stDataFrameResizable"] { color: var(--text); }
-
-.stButton>button {
-  font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.06em;
-  border: 2px solid var(--loss); background: transparent; color: var(--loss); border-radius: 4px;
-}
-.stButton>button:hover { background: var(--loss); color: var(--bg); border-color: var(--loss); }
-
-[data-testid="stDataFrame"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }
-
-:focus-visible { outline: 2px solid var(--discipline); outline-offset: 2px; }
-</style>
-""" % {"root": _ROOT_CSS}
+# Single-line rules, no blank lines, no /* */ comments inside the <style>
+# block itself -- st.markdown's markdown parser (not a real HTML parser)
+# can mangle a multi-line stylesheet with blank lines/comments into partly
+# literal text. @import instead of <link> tags for the same reason: raw
+# <link> elements are more likely to get escaped by the markdown pass than
+# a plain @import sitting inside <style>. Never add a rule targeting bare
+# <span> font-family -- Streamlit renders its own icon glyphs (expander
+# chevrons, spinner icons) as ligature text inside plain <span> elements via
+# a Material Symbols font; overriding it site-wide breaks the ligature and
+# the literal icon name shows up as text instead.
+_CSS_RULES = [
+    "@import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap');",
+    _ROOT_CSS.replace("\n", " "),
+    "html, body, .stApp, [data-testid=\"stAppViewContainer\"], [data-testid=\"stMain\"], [data-testid=\"stMainBlockContainer\"], .main .block-container, [data-testid=\"stSidebar\"], [data-testid=\"stSidebarContent\"], [data-testid=\"stBottomBlockContainer\"], [data-testid=\"stHeader\"] { background: var(--bg) !important; color: var(--text) !important; font-family: 'IBM Plex Sans', sans-serif; }",
+    ".stApp p, .stApp li, .stApp label { font-family: 'IBM Plex Sans', sans-serif; color: var(--text); }",
+    "[data-testid=\"stFileUploaderDropzone\"], [data-testid=\"stFileUploader\"] section { background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important; }",
+    "[data-testid=\"stTextInput\"] input, [data-testid=\"stNumberInput\"] input, [data-testid=\"stSelectbox\"] div[data-baseweb=\"select\"] > div, [data-testid=\"stTextArea\"] textarea { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }",
+    "[data-testid=\"stCheckbox\"] label span, [data-testid=\"stRadio\"] label span, [data-testid=\"stWidgetLabel\"] p { color: var(--text) !important; }",
+    "[data-testid=\"stAlert\"] { background: var(--surface) !important; color: var(--text) !important; }",
+    "[data-testid=\"stCaptionContainer\"] { color: var(--muted) !important; }",
+    "[data-testid=\"stMarkdownContainer\"] { color: var(--text); }",
+    ".stApp h1, .stApp h2, .stApp h3 { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; color: var(--ink); }",
+    ".stApp h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3em; margin-top: 1.6em; }",
+    "[data-testid=\"stMetric\"] { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem; }",
+    "[data-testid=\"stMetricLabel\"] { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--muted); }",
+    "[data-testid=\"stMetricValue\"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }",
+    "[data-testid=\"stExpander\"] { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }",
+    "[data-testid=\"stExpander\"] summary, [data-testid=\"stExpander\"] summary p { color: var(--text) !important; }",
+    "[data-testid=\"stExpanderDetails\"] { background: var(--surface) !important; color: var(--text) !important; }",
+    "[data-testid=\"stDataFrameResizable\"] { color: var(--text); }",
+    ".stButton>button { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.06em; border: 2px solid var(--loss); background: transparent; color: var(--loss); border-radius: 4px; }",
+    ".stButton>button:hover { background: var(--loss); color: var(--bg); border-color: var(--loss); }",
+    "[data-testid=\"stDataFrame\"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }",
+    ":focus-visible { outline: 2px solid var(--discipline); outline-offset: 2px; }",
+]
+_CSS = "<style>" + " ".join(_CSS_RULES) + "</style>"
 
 
 def inject():
-    # st.html(), not st.markdown(unsafe_allow_html=True) -- markdown() runs
-    # content through Streamlit's markdown parser first, which mangles a
-    # multi-line <style> block (blank lines, /* comments */) into partly-
-    # literal text instead of passing it through untouched.
-    st.html(_CSS)
+    st.markdown(_CSS, unsafe_allow_html=True)
 
 
 def _tilt(seed):
