@@ -1,8 +1,6 @@
 """Bearish reversal candlestick patterns, detected from OHLCV alone.
-Dropdown/table-only (exit_triggers.py wires these into STOP_LOSS_TRIGGERS,
-not chart.py's CHART_TRIGGER_KEYS). Each function returns a boolean Series
-aligned to w.index -- True on bars where that pattern's shape completed.
-"""
+Dropdown/table-only -- exit_triggers.py wires these into STOP_LOSS_TRIGGERS,
+not chart.py's CHART_TRIGGER_KEYS."""
 SMALL_BODY_RATIO = 0.30       # body <= this fraction of the day's range counts as "small"
 LONG_WICK_RATIO = 2.0         # a wick this many times the body counts as "long"
 DOJI_BODY_RATIO = 0.10

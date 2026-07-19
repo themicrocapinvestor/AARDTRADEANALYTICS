@@ -1,17 +1,7 @@
-"""The infographic per trade -- a big, readable multi-panel technical chart
-(OHLC price bars + 20/50/150/200-day averages + volume with its own 50-day
-average + Stage shading, Relative Strength, MACD, RSI), sharing one x-axis.
+"""The infographic per trade -- a multi-panel technical chart.
 
-The caller (app.py) picks up to two triggers from exit_triggers.TRIGGERS via
-a dropdown -- keeping this to two is what makes per-occurrence arrow labels
-readable instead of the wall-of-labels collision problem a fixed 6+ triggers
-produced. Every occurrence still gets a marker dot (on the price panel, plus
-a small ring on the relevant indicator panel), but only occurrences at least
-LABEL_MIN_GAP_DAYS apart get a floating arrow label -- dense repeats (e.g. a
-choppy stretch of distribution days) still show as dots without stacking
-text on top of each other. Optional Gann/Fibonacci levels (from
-exit_triggers.gann_fib_levels) draw as dashed horizontal reference lines
-from entry to the most recent bar.
+Caller picks up to two triggers -- capped at 2 because more caused
+per-occurrence label collisions.
 """
 import pandas as pd
 import plotly.graph_objects as go
@@ -76,29 +66,23 @@ STAGE_MIN_LABEL_BARS = 15  # skip labelling a stage segment shorter than this --
                             # squashed, overlapping-text look when stage flips quickly
 
 
-def _stage_segments(w, window_index):
+def _stage_segments(w):
     """Contiguous (start_date, end_date, stage_name) runs of daily_base.stage()
-    within the visible window -- used to shade the price panel and drop one
-    label per (wide enough) stage change, instead of relabelling every bar."""
-    positions = w.index.get_indexer(window_index)
-    stages = [stage_at(w, int(p)) for p in positions]
+    across the FULL fetched history, not just the chart's visible window --
+    so a stage that began before the window's 75-day lookback still reports
+    its true duration instead of only the sliver that happens to be on screen."""
+    stages = [stage_at(w, i) for i in range(len(w))]
     segments = []
     seg_start = 0
     for i in range(1, len(stages) + 1):
         if i == len(stages) or stages[i] != stages[seg_start]:
             if stages[seg_start] is not None:
-                segments.append((window_index[seg_start], window_index[i - 1], stages[seg_start]))
+                segments.append((w.index[seg_start], w.index[i - 1], stages[seg_start]))
             seg_start = i
     return segments
 
 
 def trade_chart(w, diag, triggers, gann_levels=None):
-    """w: the symbol's prepared indicator frame. diag: one diagnosed trade
-    dict. triggers: up to two rows from exit_triggers.evaluate_triggers(...)
-    output (each with a "key", "label", and "occurrences" list) -- the ones
-    the user picked to mark on the chart. gann_levels: optional
-    exit_triggers.gann_fib_levels(...) output, drawn as dashed reference
-    lines from entry to the latest bar."""
     entry_date, exit_date = diag["entry_date"], diag["exit_date"]
 
     window_start = max(entry_date - pd.Timedelta(days=75), w.index[0])
@@ -115,18 +99,26 @@ def trade_chart(w, diag, triggers, gann_levels=None):
     )
     fig.update_annotations(font_size=16)  # the row titles Plotly auto-adds
 
-    # --- Row 1: Stage shading + one label per wide-enough stage segment ---
-    for seg_start, seg_end, seg_name in _stage_segments(w, window.index):
-        fig.add_vrect(x0=seg_start, x1=seg_end, fillcolor=STAGE_FILL.get(seg_name, "rgba(0,0,0,0)"),
-                       line_width=0, layer="below", row=1, col=1)
-        seg_bars = window.index.slice_indexer(seg_start, seg_end)
-        if seg_bars.stop - seg_bars.start < STAGE_MIN_LABEL_BARS:
+    # --- Row 1: Stage shading + one label (with duration) per wide-enough stage segment ---
+    for seg_start, seg_end, seg_name in _stage_segments(w):
+        if seg_end < window.index[0] or seg_start > window.index[-1]:
             continue
-        mid = window.index[(seg_bars.start + seg_bars.stop) // 2]
-        fig.add_annotation(x=mid, y=0.98, yref="y domain", yanchor="top", xanchor="center",
-                            text=STAGE_LABEL.get(seg_name, seg_name), showarrow=False,
-                            font=dict(size=13, color=INK), bgcolor="rgba(27,30,39,0.75)",
-                            row=1, col=1)
+        vis_start, vis_end = max(seg_start, window.index[0]), min(seg_end, window.index[-1])
+        fig.add_vrect(x0=vis_start, x1=vis_end, fillcolor=STAGE_FILL.get(seg_name, "rgba(0,0,0,0)"),
+                       line_width=0, layer="below", row=1, col=1)
+        vis_bars = window.index.slice_indexer(vis_start, vis_end)
+        if vis_bars.stop - vis_bars.start < STAGE_MIN_LABEL_BARS:
+            continue
+        weeks = round((seg_end - seg_start).days / 7)
+        week_word = "week" if weeks == 1 else "weeks"
+        mid = window.index[(vis_bars.start + vis_bars.stop) // 2]
+        fig.add_annotation(
+            x=mid, y=0.98, yref="y domain", yanchor="top", xanchor="center",
+            text=f"{STAGE_LABEL.get(seg_name, seg_name)}<br><b>{weeks} {week_word}</b>", showarrow=False,
+            font=dict(size=13, color=INK), bgcolor="rgba(27,30,39,0.75)",
+            bordercolor=STAGE_FILL.get(seg_name, GRID).replace("0.10", "0.9"), borderwidth=1, borderpad=4,
+            row=1, col=1,
+        )
 
     # --- Row 1: price as OHLC bars (not candles -- cleaner at this density) + averages ---
     fig.add_trace(go.Ohlc(x=window.index, open=window["open"], high=window["high"],
@@ -190,13 +182,6 @@ def trade_chart(w, diag, triggers, gann_levels=None):
         fig.add_hline(y=70, line_dash="dot", line_color=LOSS, row=5, col=1)
         fig.add_hline(y=30, line_dash="dot", line_color=DISCIPLINE, row=5, col=1)
 
-    # Every occurrence gets a dot (price panel + a ring on the relevant
-    # indicator panel). Only occurrences LABEL_MIN_GAP_DAYS apart get a
-    # floating arrow label -- with at most two triggers selected (the
-    # dropdown above the chart), this keeps labels both readable (real
-    # arrows pointing at a real date, not a summary box) and collision-free
-    # (dense repeats fall back to dots-only). Full per-occurrence detail is
-    # always in app.py's trigger table below the chart regardless.
     for slot, t in enumerate(triggers[:2]):
         color = TRIGGER_SLOT_COLOR[slot]
         ay = TRIGGER_SLOT_AY[slot]
@@ -279,8 +264,7 @@ def trade_chart(w, diag, triggers, gann_levels=None):
 
 
 def mistake_frequency_chart(freq):
-    """Horizontal bar chart, full un-truncated labels -- replaces
-    st.bar_chart, which clips long mistake labels under rotated ticks."""
+    """Replaces st.bar_chart, which clips long mistake labels under rotated ticks."""
     labels = list(freq.keys())
     values = list(freq.values())
     fig = go.Figure(go.Bar(x=values, y=labels, orientation="h", marker_color=LOSS))
@@ -302,12 +286,8 @@ _HEATMAP_MONTH_NAMES = [
 
 
 def monthly_heatmap(months):
-    """GitHub-contributions-style grid: one row per year, one column per
-    calendar month, cell shaded red/teal by that month's aggregate return %.
-    `months` is the full (unsliced) output of mirror_narrative.monthly_returns
-    -- every month with at least one closed trade, not just best/worst N.
-    Months with no trades render as blank grey cells rather than 0% (0% is a
-    real, plottable outcome; "no data" is not the same thing)."""
+    """Months with no trades render as blank grey cells rather than 0% (0%
+    is a real, plottable outcome; "no data" is not the same thing)."""
     by_key = {m["sort_key"]: m for m in months}
     years = sorted({int(k[:4]) for k in by_key}, reverse=True)
 
@@ -351,9 +331,6 @@ def monthly_heatmap(months):
 
 
 def holding_period_chart(diagnosed):
-    """Two bars: average days held for winning trades vs. losing trades --
-    the classic "cut winners short, let losers run" tell made visible in one
-    glance instead of buried in a single averaged "Avg days held" metric."""
     wins = [d["days_in_trade"] for d in diagnosed if d["pnl_rupees"] > 0]
     losses = [d["days_in_trade"] for d in diagnosed if d["pnl_rupees"] <= 0]
     avg_win = round(sum(wins) / len(wins), 1) if wins else 0.0
@@ -380,13 +357,9 @@ def holding_period_chart(diagnosed):
 
 
 def equity_curve_chart(diagnosed, benchmark_daily=None, benchmark_label="NIFTY 500"):
-    """Cumulative return %, portfolio vs. benchmark, both rebased to 0% at
-    the first trade's exit date. Portfolio curve is a running SUM of each
-    trade's user_return_pct in exit-date order -- plain addition, same
-    convention as backtest_stats' expectancy_pct and monthly_returns'
-    avg_return_pct elsewhere in this app, not compounded -- so this stays
-    consistent with every other return number shown, rather than introducing
-    a second, incompatible math convention just for this one chart."""
+    """Portfolio curve is a running SUM of each trade's user_return_pct
+    (plain addition, not compounded) -- matches the convention used by
+    backtest_stats/monthly_returns elsewhere in this app."""
     ordered = sorted(diagnosed, key=lambda d: d["exit_date"])
     dates = [d["exit_date"] for d in ordered]
     cum = []

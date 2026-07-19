@@ -1,24 +1,13 @@
-"""Behavioral bias inference layer -- reads diagnosed trades (already scored
-against Stage/composite/RS by mistake_diagnosis.py) plus each trade's fired
-exit triggers (exit_triggers.py) and the raw fill sequence (tradebook_parser
-.py's fills_in), and surfaces named psychological patterns (disposition
-effect, revenge trading, overconfidence, anchoring, loss aversion, herding/
-FOMO, sunk cost, status-quo/paralysis, endowment effect) with plain-English
-evidence -- both per trade and as a whole-tradebook "Investor Behavioral
-Profile".
+"""Behavioral bias inference layer -- reads diagnosed trades, fired exit
+triggers, and raw fill sequences to surface named psychological patterns
+(disposition effect, revenge trading, overconfidence, anchoring, loss
+aversion, herding/FOMO, sunk cost, status-quo/paralysis, endowment effect)
+with plain-English evidence, both per trade and portfolio-wide.
 
-READ-ONLY on top of existing output: never touches diagnosis, chart, or
-trigger-detection code, and never invents new market data. Position size in
-the strict risk-management sense (stop-distance-based sizing) isn't
-available, but capital deployed per trade (quantity x entry_price) already
-is -- that's what the revenge-trading size check uses.
-
-Correlational, not diagnostic: individual causal attribution (e.g. "held
-because of regret aversion" vs a rational thesis) can't be proven from
-price/date data alone, so every trait reads as "consistent with X", never a
-clinical claim. Scores are down-weighted by trade count so a handful of
-trades never reads as a confident portfolio-wide diagnosis.
-"""
+Correlational, not diagnostic: individual causal attribution can't be proven
+from price/date data alone, so every trait reads as "consistent with X",
+never a clinical claim. Scores are down-weighted by trade count so a handful
+of trades never reads as a confident portfolio-wide diagnosis."""
 import exit_triggers
 
 # --- thresholds -- literature-grounded starting points, not fit to any one
@@ -39,10 +28,9 @@ def capital_deployed(diag):
 
 
 def ignored_triggers_before_exit(diag, w):
-    """Every independent exit-trigger occurrence that fired strictly between
-    entry and the user's OWN exit date -- i.e. every warning already shown
-    on the trade's chart that wasn't acted on. w: that symbol's prepared
-    indicator frame (prepare_symbol_frame output), or None if unavailable."""
+    """Every exit-trigger occurrence that fired strictly between entry and
+    the user's OWN exit date -- i.e. every warning shown on the trade's
+    chart that wasn't acted on."""
     if w is None:
         return []
     i_entry = w.index.searchsorted(diag["entry_date"], side="right") - 1
@@ -60,12 +48,10 @@ def ignored_triggers_before_exit(diag, w):
 
 
 def is_averaging_down(raw_trade):
-    """True if this trade's buy fills (tradebook_parser fills_in: [(date,
-    price, qty), ...]) show a SECOND (or later) buy at a lower price than
-    the first -- adding to a position that had already gone against the
-    entry, the textbook sunk-cost "lower my average" move. raw_trade: the
-    matching dict from tradebook_parser.build_roundtrip_trades (has
-    fills_in) -- NOT the diagnosed dict, which doesn't carry fills through."""
+    """True if a later buy fill was at a lower price than the first -- the
+    textbook sunk-cost "lower my average" move. raw_trade must be the
+    tradebook_parser.build_roundtrip_trades dict (has fills_in), NOT the
+    diagnosed dict, which doesn't carry fills through."""
     fills_in = (raw_trade or {}).get("fills_in") or []
     if len(fills_in) < 2:
         return False
@@ -87,15 +73,12 @@ def _confidence(n):
 
 
 def raw_trade_lookup(raw_trades):
-    """{(symbol, entry_date, exit_date): raw trade dict} -- raw_trades is
-    tradebook_parser.build_roundtrip_trades's output, matched against a
-    diagnosed dict by the same three keys both share."""
+    """Matches a diagnosed dict to its raw trade by the three keys both share."""
     return {(t["symbol"], t["entry_date"], t["exit_date"]): t for t in (raw_trades or [])}
 
 
 class Baseline:
-    """Portfolio-wide reference stats every per-trade check compares
-    against -- computed once per report, not per trade."""
+    """Computed once per report, not per trade."""
 
     def __init__(self, diagnosed):
         self.by_entry = sorted(diagnosed, key=lambda d: d["entry_date"])
@@ -103,10 +86,8 @@ class Baseline:
         self.n_trades = len(diagnosed)
 
     def prior_loss_within(self, diag, window_days):
-        """Most recent trade (by exit_date, across the WHOLE portfolio --
-        not just the same symbol) that closed at a loss before `diag`'s own
-        entry, if its exit fell within `window_days` of this entry. None if
-        no qualifying prior loss exists."""
+        """Most recent trade across the WHOLE portfolio that closed at a loss
+        before `diag`'s entry, within `window_days` of it. None otherwise."""
         candidates = [
             d for d in self.by_entry
             if d is not diag and d["exit_date"] <= diag["entry_date"] and d["pnl_rupees"] < 0
@@ -121,11 +102,8 @@ class Baseline:
 
 def trade_behavioral_notes(diag, baseline, w=None, raw_trade=None, currency="₹"):
     """Humanized 0-6 bullet list of behavioral traits THIS specific trade is
-    evidence for -- meant to sit alongside the existing roast/aftermath
-    bullets (mirror_narrative.all_bullets) when a trade is selected. Each
-    bullet names the trait plainly and cites the number/date that
-    triggered it, matching mirror_narrative.py's convention of never
-    roasting without a real figure attached."""
+    evidence for. Each bullet names the trait plainly and cites the actual
+    number/date that triggered it."""
     symbol = diag["symbol"]
     ignored = ignored_triggers_before_exit(diag, w)
     notes = []
@@ -195,12 +173,10 @@ def trade_behavioral_notes(diag, baseline, w=None, raw_trade=None, currency="₹
 
 
 def investor_profile(diagnosed, symbol_frames, raw_trades=None):
-    """Bottom-of-report 'Investor Behavioral Profile' -- covers every closed
-    trade in the uploaded tradebook (the whole uploaded range, not a
-    calendar/FY slice, since the export window is whatever the user chose
-    when downloading from Console). Returns {"traits": {trait_key: {label,
-    score (0-1), confidence (0-1), evidence: [bullets]}}, "dominant": [top
-    trait_keys], "n_trades": int}, or None if there's nothing to profile."""
+    """Covers every closed trade in the uploaded tradebook (the whole
+    uploaded range, not a calendar/FY slice). Returns {"traits": {trait_key:
+    {label, score (0-1), confidence (0-1), evidence: [bullets]}}, "dominant":
+    [top trait_keys], "n_trades": int}, or None if nothing to profile."""
     if not diagnosed:
         return None
     baseline = Baseline(diagnosed)

@@ -1,19 +1,13 @@
-"""Parses Zerodha Console's Tradebook export (Console -> Reports -> Tradebook,
-CSV/Excel, any date range up to 12 months) into round-trip trades.
-
-This is NOT available from Kite Connect -- the Connect API's order book only
-returns the CURRENT day's orders, and there's no historical trades endpoint.
-The Tradebook is a separate manual export from Console, so this module reads
-whatever column names that export actually uses rather than assuming a fixed
-Kite Connect response shape.
+"""Parses Zerodha Console's Tradebook export (CSV/Excel) into round-trip
+trades. Not available from Kite Connect -- the Connect API's order book only
+returns the CURRENT day's orders, no historical trades endpoint.
 
 Console's Tradebook is a stream of individual FILLS (one row per execution),
-not trades -- a single "trade" the user thinks of as one buy-and-sell can be
-many fill rows on both legs (partial fills, scale-ins, scale-outs). This
-module FIFO-matches buy fills against sell fills per symbol to reconstruct
-actual round-trip positions, mirroring unified_backtest.py's fills_in/
-fills_out/average_entry shape so the rest of the app (mistake_diagnosis.py)
-can reuse that same trade dict convention.
+not trades -- a single "trade" can be many fill rows on both legs (partial
+fills, scale-ins, scale-outs). This module FIFO-matches buy fills against
+sell fills per symbol to reconstruct round-trip positions, mirroring
+unified_backtest.py's fills_in/fills_out/average_entry shape so the rest of
+the app can reuse that same trade dict convention.
 """
 import io
 
@@ -54,10 +48,8 @@ def _canonicalize_columns(df):
 
 
 def _read_one(uploaded_file):
-    """uploaded_file: a Streamlit UploadedFile (has .name, file-like) or a
-    plain file path string. Returns a normalized fills DataFrame with columns
-    symbol/trade_date/trade_type/quantity/price, or raises ValueError if the
-    file doesn't look like a Tradebook export at all."""
+    """Returns a normalized fills DataFrame, or raises ValueError if the file
+    doesn't look like a Tradebook export at all."""
     name = getattr(uploaded_file, "name", str(uploaded_file)).lower()
     if name.endswith((".xlsx", ".xls")):
         df = pd.read_excel(uploaded_file)
@@ -80,11 +72,8 @@ def _read_one(uploaded_file):
 
 
 def load_tradebook(uploaded_files):
-    """uploaded_files: list of uploaded Tradebook files (typically one, but
-    a user may hand over separate exports for different date ranges).
-    Returns (fills_df, errors) -- errors is [(filename, message)] for files
-    that couldn't be parsed, same "report and skip, never raise on one bad
-    file" convention as manual_universe.load_manual_universe."""
+    """Returns (fills_df, errors) -- errors is [(filename, message)] for files
+    that couldn't be parsed; a bad file is reported and skipped, never raised."""
     frames, errors = [], []
     for f in uploaded_files:
         try:
@@ -101,23 +90,15 @@ def load_tradebook(uploaded_files):
 def build_roundtrip_trades(fills_df):
     """FIFO-matches BUY fills against SELL fills, per symbol, into round-trip
     trade dicts. A position that returns to flat (0 qty) closes one trade;
-    further buys after that start a new one. Handles scale-ins (multiple
-    buys before flat) and scale-outs (multiple sells draining one position)
-    by keeping fills_in/fills_out lists and a quantity-weighted average
-    entry/exit, same shape unified_backtest._finalize_trade produces.
+    further buys after that start a new one.
 
     A SELL that exceeds the currently open quantity (short sale, or a fill
-    the tradebook window doesn't have the matching buy for -- e.g. a
-    position opened before the uploaded date range) is capped to the
+    the tradebook window doesn't have the matching buy for) is capped to the
     available open quantity; the excess is dropped and counted in
-    `unmatched_sell_qty` per symbol, reported back rather than raised, since
-    one ragged edge shouldn't sink the whole reconstruction.
+    `unmatched` per symbol, reported back rather than raised, since one
+    ragged edge shouldn't sink the whole reconstruction.
 
-    Returns (trades, unmatched) -- trades: list of dicts (symbol, entry_date,
-    entry_price, exit_date, exit_price, quantity, pnl_rupees, return_pct,
-    days_in_trade, fills_in, fills_out). unmatched: {symbol: qty} for any
-    SELL quantity that couldn't be matched to a prior BUY.
-    """
+    Returns (trades, unmatched)."""
     trades = []
     unmatched = {}
 

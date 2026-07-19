@@ -1,15 +1,10 @@
 """AARD Tradebook Analytics -- DEMO MODE.
 
-Identical analysis pipeline to app.py (same Kite fetch, same scoring, run
-against YOUR real tradebook with YOUR own Kite login) -- the only
-difference is what's rendered: every real ticker symbol is replaced with a
-stable STOCK#1, STOCK#2... label before anything reaches the screen.
-Industry / industry group are left real, since that's sector composition,
-not identity. See demo_anonymize.py for exactly what gets swapped and why.
-
-This is a separate entry point (not a mode flag inside app.py) so the
-anonymization boundary is a hard file boundary, not a runtime branch that
-could accidentally be left off.
+Identical analysis pipeline to app.py -- the only difference is every real
+ticker symbol is replaced with a stable STOCK#1, STOCK#2... label before
+anything reaches the screen (see demo_anonymize.py). A separate entry point
+rather than a mode flag inside app.py, so the anonymization boundary is a
+hard file boundary, not a runtime branch that could accidentally be left off.
 """
 import os
 

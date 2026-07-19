@@ -1,27 +1,10 @@
 """Ayush's Screen -- daily horizontal-base-breakout detector, encoding a
 custom set of "winning stock" breakout/base/momentum rules.
 
-This is the daily-cadence sibling of the weekly app (kite-weekly-screener) --
-every day-count threshold below is that app's week-count x5 (~5 trading days
-per week), reverting back toward the rules' original daily-bar day-counts.
-Percent thresholds, volume multiples, and touch/count thresholds are
-UNCHANGED from the weekly version -- those aren't day-count stand-ins, they
-don't need to change just because the bar size did.
-
-  - trend filter: SMA50/SMA200 (the literal daily Minervini/O'Neil trend
-    template lengths -- this is what the weekly app's SMA10/SMA40 were
-    themselves rescaled FROM). A SECOND, independent trend lens also runs
-    alongside this one: Stage Analysis (Stan Weinstein) via the full daily
-    SMA50/SMA150/SMA200 stack plus 60-day Relative Strength and each SMA's
-    own slope (see stage() below for the exact Stage 1-4 rules). A stock
-    qualifies as trend-OK if EITHER lens says so (see trend_ok() below) --
-    deliberately an OR, not a stricter AND, so a setup that's a bit
-    early/late by one lens can still be caught by the other, rather than
-    needing both to agree.
-  - base length: minimum 30 trading days (~6 weeks), same real-world span
-    as the weekly app's 6-week minimum, just expressed in daily bars now.
-  - Choppiness and liquidity thresholds: unchanged in spirit, just
-    computed on daily ATR% and daily turnover instead of weekly.
+Daily-cadence sibling of the weekly app (kite-weekly-screener): every
+day-count threshold below is that app's week-count x5 (~5 trading days per
+week); percent thresholds, volume multiples, and touch/count thresholds are
+UNCHANGED from the weekly version since those aren't day-count stand-ins.
 
 Everything here is pure (DataFrame in, dict out) -- no Kite/network calls --
 so it's unit-testable and reusable from both the live scanner and the backtest.
@@ -145,16 +128,10 @@ def _atr_pct(daily, n=14):
 
 
 def compute_indicators(daily, rs_60=None, rs_123=None, rs_30=None):
-    """daily: OHLCV DataFrame (daily bars, as fetched -- no resampling). Adds
-    columns used by both the live detector and the backtest, so both share
-    one definition of the indicators. rs_60/rs_123: optional Series (from
-    relative_strength.compute_rs with length=RS_LOOKBACK_SHORT_DAYS/
-    RS_LOOKBACK_LONG_DAYS), aligned onto daily's index -- omitted entirely
-    (no "rs_60"/"rs_123" column) when RS isn't available, so exclusions()
-    can just check for the columns' presence. Both windows are required to
-    pass the weak-RS exclusion (see relative_strength.py's module docstring for why).
-    rs_30: optional Series at length=RS_LOOKBACK_MOMENTUM_DAYS, used only by
-    momentum_score's composite ranking below (not an eligibility gate)."""
+    """rs_60/rs_123 columns are omitted entirely (not just left NaN) when RS
+    isn't available, so exclusions() can just check for the columns'
+    presence. rs_30 feeds only momentum_score's composite ranking, not an
+    eligibility gate."""
     w = daily.copy()
     w["sma_fast"] = _sma(w["close"], TREND_SMA_FAST)
     w["sma_mid"] = _sma(w["close"], TREND_SMA_MED)
@@ -204,27 +181,14 @@ def _trend_ok_classic(w, i):
 
 
 def stage(w, i):
-    """Weinstein-style Stage Analysis via the literal daily 50/150/200-day
-    SMA stack, 60-day Relative Strength, and each SMA's own slope -- the
-    same Minervini/Weinstein ingredients as _trend_ok_classic and
-    extra_indicators.minervini_ok (their EMA-based siblings), combined here
-    into all four Stages instead of a single pass/fail:
+    """Weinstein-style Stage Analysis (1=basing, 2=advancing, 3=topping,
+    4=declining) via the daily 50/150/200-day SMA stack, 60-day Relative
+    Strength, and each SMA's own slope.
 
-      Stage 2 (advancing): Price > SMA50 > SMA150 > SMA200, RS(60d) > 0,
-        AND all three SMAs rising (each vs. STAGE_SLOPE_LOOKBACK_DAYS ago).
-      Stage 4 (declining): the mirror image -- Price < SMA50 < SMA150 <
-        SMA200, RS(60d) <= 0, AND all three SMAs falling.
-      Stage 3 (topping): the SMA stack is still bullish (SMA50 >= SMA150 >=
-        SMA200) but Stage 2's stricter rising/RS-positive bar isn't met --
-        an uptrend that's lost its momentum.
-      Stage 1 (basing): the SMA stack is still bearish (SMA50 <= SMA150 <=
-        SMA200) but Stage 4's stricter falling/RS-negative bar isn't met --
-        a decline that's lost its downside momentum.
-
-    Returns None if there isn't enough history yet, or if RS(60d) isn't
-    available at all (no benchmark was supplied to compute_indicators) --
-    RS is a required leg of the Stage 2/4 tests, not optional confirmation,
-    so a Stage read without it would silently be looser than intended."""
+    Returns None if RS(60d) isn't available at all (no benchmark was
+    supplied to compute_indicators) -- RS is a required leg of the Stage 2/4
+    tests, not optional confirmation, so a Stage read without it would
+    silently be looser than intended."""
     row = w.iloc[i]
     s50, s150, s200 = row["sma_fast"], row["sma_mid"], row["sma_slow"]
     if pd.isna(s50) or pd.isna(s150) or pd.isna(s200) or i < STAGE_SLOPE_LOOKBACK_DAYS:
@@ -265,21 +229,13 @@ def trend_ok(w, i):
 
 
 def momentum_score(w, i, lookback=MOMENTUM_LOOKBACK_DAYS):
-    """Cross-sectional momentum-leader composite -- captures both price
-    AND volume, five equal-weighted (1/5 each) conditions, same "hits / N *
-    100" convention as extra_indicators.score_at() elsewhere in this app:
-      1. {lookback}-day return > 0
-      2. RVol > MIN_RVOL_PCT (currently trading on above-average volume)
-      3. ADX(14) > MOMENTUM_ADX_MIN (actually trending, not choppy)
-      4. OBV trend up (OBV today > OBV OBV_TREND_LOOKBACK_DAYS ago -- volume
-         is confirming the price move, not diverging from it)
-      5. RS (RS_LOOKBACK_MOMENTUM_DAYS-day) > 0 vs NIFTY 500 (outperforming
-         the index over a faster window than the entry filter's own 60d/123d)
-    A condition that can't be computed yet (not enough history, RS/ADX/OBV
-    column missing) simply doesn't count as a hit -- it isn't treated as a
-    fail, so a partially-warmed-up frame still gets a (lower-confidence)
-    score instead of None, provided the {lookback}-day return itself has
-    enough history (the one hard requirement below)."""
+    """Cross-sectional momentum-leader composite -- five equal-weighted
+    (1/5 each) price/volume conditions, same "hits / N * 100" convention as
+    extra_indicators.score_at() elsewhere in this app. A condition that
+    can't be computed yet (not enough history, RS/ADX/OBV column missing)
+    doesn't count as a hit but also isn't treated as a fail, so a
+    partially-warmed-up frame still gets a (lower-confidence) score instead
+    of None, provided the {lookback}-day return itself has enough history."""
     if i < lookback:
         return None
     row = w.iloc[i]
@@ -551,30 +507,16 @@ def _gap_support_level(w, base_start, base_end):
 
 def detect_daily_setup(daily, symbol=None, min_base_days=BASE_MIN_DAYS, max_base_days=BASE_MAX_DAYS,
                         rs_60_series=None, rs_123_series=None, rs_30_series=None):
-    """daily: OHLCV DataFrame (daily bars, as fetched). rs_60_series/
-    rs_123_series: optional Series from relative_strength.compute_rs() at
-    length=RS_LOOKBACK_SHORT_DAYS/RS_LOOKBACK_LONG_DAYS, aligned to daily's
-    index -- when both given, a stock whose latest RS vs the benchmark is
-    <= 0 is excluded (weak RS) before base/breakout
-    logic ever runs. rs_30_series: optional Series at
-    RS_LOOKBACK_MOMENTUM_DAYS -- passed through so the returned signal's
-    "momentum" composite includes its RS(30d) leg; omitted, that leg just
-    doesn't count as a hit. Returns a dict describing the most recent state, or
-    None if nothing qualifies:
-      status 'BREAKOUT' -> last closed day broke out of a qualifying base
-      status 'IN_BASE'  -> currently coiling in a qualifying base, watch the level
-      status 'EXCLUDED' -> most recent day trips one or more X-rules
-    Sequencing: the base must show >= min_base_days of contraction BEFORE
-    the breakout day is evaluated -- this function only ever looks at CLOSED
-    daily bars, so there's no look-ahead into a still-forming day.
+    """Returns a dict describing the most recent state (status BREAKOUT /
+    IN_BASE / EXCLUDED), or None if nothing qualifies. Only ever looks at
+    CLOSED daily bars, so there's no look-ahead into a still-forming day.
 
-    This is a thin wrapper around detect_daily_setup_at: it computes
-    indicators once over the given (already as-of-today) daily frame and
-    evaluates at its last row. Callers that already have a symbol's FULL
+    Thin wrapper around detect_daily_setup_at that computes indicators once
+    and evaluates at the last row. Callers that already have a symbol's FULL
     multi-year indicator frame precomputed (e.g. the backtest walk, which
-    needs to evaluate many earlier "as of" dates without re-slicing/
-    recomputing indicators every time -- previously the dominant cost of a
-    backtest run) should call detect_daily_setup_at directly instead.
+    evaluates many earlier "as of" dates without re-slicing/recomputing
+    indicators every time -- previously the dominant cost of a backtest run)
+    should call detect_daily_setup_at directly instead.
     """
     if daily is None or len(daily) < min_base_days + TREND_SMA_SLOW:
         return None
@@ -584,18 +526,15 @@ def detect_daily_setup(daily, symbol=None, min_base_days=BASE_MIN_DAYS, max_base
 
 
 def detect_daily_setup_at(w, last, symbol=None, min_base_days=BASE_MIN_DAYS, max_base_days=BASE_MAX_DAYS):
-    """Same detection logic as detect_daily_setup, but evaluated at an
-    explicit `last` index into an ALREADY indicator-computed frame `w` (via
-    compute_indicators), rather than always evaluating at w's final row.
-
-    w may be longer than last+1 -- e.g. a symbol's entire multi-year history,
-    precomputed once. Every rolling indicator compute_indicators builds is
-    strictly backward-looking (rolling means/max/shift), so a value at row
-    `last` is identical whether computed on the full series or on a slice
-    ending at `last` -- the only place look-ahead could sneak in is the
-    +/-window swing-high/low search inside _distribution_signature and
-    _undercut_and_rally, which is why those now take an explicit max_index
-    bound instead of defaulting to len(w)-1.
+    """Same detection logic as detect_daily_setup, evaluated at an explicit
+    `last` index into an ALREADY indicator-computed frame `w`, which may be
+    longer than last+1 (e.g. a symbol's full multi-year history precomputed
+    once). Every rolling indicator is strictly backward-looking, so a value
+    at row `last` is identical whether computed on the full series or a
+    slice ending at `last` -- the only place look-ahead could sneak in is
+    the +/-window swing search inside _distribution_signature and
+    _undercut_and_rally, which is why those take an explicit max_index bound
+    instead of defaulting to len(w)-1.
     """
     if w is None or last < 0 or last >= len(w) or last < min_base_days + TREND_SMA_SLOW - 1:
         return None

@@ -1,20 +1,14 @@
-"""Cosmetic-only symbol anonymization for the public demo app (demo_app.py).
-
-Runs strictly AFTER every real-data step (Kite fetch, scoring, industry
-classification) is already done -- the math demo_app.py shows is identical
-to app.py's, computed against the user's real symbols. This module only
-swaps what gets *displayed*: the real ticker is replaced with a stable
-STOCK#N label wherever a trade is rendered. Industry / industry group stay
-untouched (that's the point -- the demo shows real sector composition
-without real tickers). company_name and isin are dropped from anonymized
-copies since they'd leak the real identity right back.
-"""
+"""Cosmetic-only symbol anonymization for the public demo app: runs strictly
+AFTER every real-data step, and only swaps what gets *displayed* (ticker ->
+STOCK#N). Industry/industry group stay untouched -- the demo shows real
+sector composition without real tickers. company_name/isin are dropped since
+they'd leak the real identity right back."""
 import re
 
 
 def build_symbol_map(diagnosed):
-    """real_symbol -> "STOCK#N", assigned in order of first entry_date so a
-    given portfolio always anonymizes the same way within one run/session."""
+    """Assigned in order of first entry_date so a given portfolio always
+    anonymizes the same way within one run/session."""
     seen = []
     for d in sorted(diagnosed, key=lambda x: x["entry_date"]):
         if d["symbol"] not in seen:
@@ -23,8 +17,7 @@ def build_symbol_map(diagnosed):
 
 
 def _scrub_text(text, symbol_map):
-    """Replace every real-symbol substring in free text with its anon label.
-    Longest symbols first, and matched on word boundaries, so a short symbol
+    """Longest symbols first, matched on word boundaries, so a short symbol
     that's a substring of a longer one never partially matches."""
     if not text:
         return text
@@ -34,8 +27,6 @@ def _scrub_text(text, symbol_map):
 
 
 def anonymize_trade(d, symbol_map):
-    """Display-only copy of one diagnosed/classified trade: symbol swapped,
-    company_name/isin dropped, industry/industry_group left as-is."""
     anon = dict(d)
     anon["symbol"] = symbol_map[d["symbol"]]
     anon.pop("company_name", None)

@@ -1,22 +1,12 @@
 """Independent technical exit triggers -- a descriptive "what if you'd exited
-here instead" comparison, not a recommendation. Split into two sides: STOP
-triggers (bearish deterioration reads) and PROFIT triggers (bullish/target
-reads), so app.py can offer "if you'd exited on whichever of these two came
-first" instead of one flat list. Every trigger mirrors a number or lens this
-app already uses elsewhere for the same concept, rather than inventing new
-criteria: RSI_OVERBOUGHT (this module's own stop-side threshold, just
-watching the cross the other direction), CHASE_EXTENSION_PCT
-(mistake_diagnosis.py's "bought too extended" threshold, reused here as
-"extended enough to take profit"), TARGET_TRIGGER_PCT/
-MIN_REWARD_RISK_MULTIPLE (unified_backtest.py's own systematic-replay
-target), daily_base.stage/_trend_ok_classic (this app's existing Weinstein
-Stage Analysis and Minervini/O'Neil trend-template lenses), and the Gann/
-Fibonacci retracement-and-extension levels computed off the pre-entry swing
-(gann_fib_levels below -- also used by chart.py to draw the levels).
-
-Every trigger label states its exact numeric condition -- not a vague
-description -- since these are simulation checks, not narrative color.
-"""
+here instead" comparison, not a recommendation. Split into STOP triggers
+(bearish deterioration) and PROFIT triggers (bullish/target), so app.py can
+offer "if you'd exited on whichever of these two came first". Every trigger
+reuses a number or lens this app already uses elsewhere for the same concept
+rather than inventing new criteria (CHASE_EXTENSION_PCT from
+mistake_diagnosis.py, TARGET_TRIGGER_PCT/MIN_REWARD_RISK_MULTIPLE from
+unified_backtest.py, daily_base.stage/_trend_ok_classic, and the Gann/
+Fibonacci levels also used by chart.py to draw them)."""
 import daily_base
 import candlestick_patterns
 from mistake_diagnosis import CHASE_EXTENSION_PCT
@@ -24,14 +14,12 @@ from unified_backtest import MIN_REWARD_RISK_MULTIPLE, TARGET_TRIGGER_PCT
 
 RSI_OVERBOUGHT = 70.0
 
-ADX_WEAK_TREND = 25.0            # extra_indicators.adx's own "trending" bar (MOMENTUM_ADX_MIN in daily_base.py)
+ADX_WEAK_TREND = 25.0            # same as MOMENTUM_ADX_MIN in daily_base.py
 ATR_EXTENSION_MULTIPLE = 2.0     # price this many ATRs above its 20-day average -- mean-reversion stretch
-TARGET_MOVE_PCT = MIN_REWARD_RISK_MULTIPLE * TARGET_TRIGGER_PCT  # the systematic-replay target as a flat % move
+TARGET_MOVE_PCT = MIN_REWARD_RISK_MULTIPLE * TARGET_TRIGGER_PCT  # systematic-replay target as a flat % move
 
-# Gann/Fibonacci levels, computed off the swing from the pre-entry structural
-# low up to the entry price itself (GANN.rtf: "identify the swing" -> "apply
-# the tools"). Retracement/extension math per that doc's Gann-wheel/Fibonacci
-# confluence table (50% = invalidation, 61.8%/100%/161.8%/261.8% = targets).
+# Gann/Fibonacci levels off the swing from the pre-entry structural low up to
+# entry price (50% = invalidation, 61.8%/100%/161.8%/261.8% = targets).
 GANN_SWING_LOOKBACK_DAYS = 40    # bars back from entry to look for the swing low
 GANN_STOP_RETRACEMENT = 0.50
 GANN_STOP_KEY = "gann_50pct_retracement_stop"
@@ -50,11 +38,9 @@ GANN_EXTENSIONS = [
 
 
 def gann_fib_levels(w, i_entry, entry_price):
-    """Swing low = lowest low in the GANN_SWING_LOOKBACK_DAYS bars up to and
-    including entry. Swing range = entry_price - swing_low (the structural
-    move that led to entry). Returns None if that range isn't positive (e.g.
-    entry wasn't actually a breakout above the recent low). Shared by
-    _detect() (crossover checks) and chart.py (drawing the levels)."""
+    """Returns None if the swing range isn't positive (e.g. entry wasn't
+    actually a breakout above the recent low). Shared by _detect() and
+    chart.py (drawing the levels)."""
     lo_idx = max(0, i_entry - GANN_SWING_LOOKBACK_DAYS)
     swing_low = float(w["low"].iloc[lo_idx:i_entry + 1].min())
     swing_range = entry_price - swing_low
@@ -95,13 +81,11 @@ TRIGGERS = STOP_LOSS_TRIGGERS + PROFIT_TRIGGERS
 
 
 def _all_after(series_bool, start_i):
-    """Every index position >= start_i where series_bool is True."""
     s = series_bool.iloc[start_i:]
     return list(s[s].index)
 
 
 def _detect(w, i_entry, entry_price):
-    """{trigger_key: [every date the crossover fired, in order]}."""
     start = i_entry + 1
     if start >= len(w):
         return {key: [] for key, _ in TRIGGERS}
@@ -244,13 +228,9 @@ def _occurrence(w, date, i_entry, entry_price, quantity, user_return_pct):
 
 
 def portfolio_stats(diagnosed, symbol_frames):
-    """Aggregate win rate across the WHOLE portfolio for each independent
-    exit trigger: if every trade had been exited on that trigger's first
-    firing after entry, what fraction of those trades would have been
-    winners? Only trades where the trigger actually fired at least once
-    count toward that trigger's stats -- this is a per-trigger backtest,
-    comparable against the user's actual consolidated win rate
-    (mirror_narrative.backtest_stats), not a per-trade table."""
+    """Per-trigger win rate across the whole portfolio, as if every trade had
+    been exited on that trigger's first firing after entry. Only trades
+    where the trigger actually fired count toward its stats."""
     per_trigger = {key: {"label": label, "returns": []} for key, label in TRIGGERS}
     for d in diagnosed:
         w = symbol_frames.get(d["symbol"])
@@ -275,12 +255,9 @@ def portfolio_stats(diagnosed, symbol_frames):
 
 
 def evaluate_triggers(w, i_entry, entry_price, quantity, user_return_pct):
-    """Returns a list of dicts, one per trigger in TRIGGERS (in order),
-    always present (fired=False, occurrences=[] rows included) so the
-    comparison shows "never triggered" scenarios too, not just the ones
-    that fired. Each dict's "occurrences" list has EVERY time that trigger
-    fired between entry and the most recent bar -- "first" is a convenience
-    alias for occurrences[0], kept for callers that only want the earliest."""
+    """One dict per trigger in TRIGGERS, always present (fired=False rows
+    included) so "never triggered" shows up too. "occurrences" has every
+    firing; "first" is occurrences[0] for callers that want just the earliest."""
     raw = _detect(w, i_entry, entry_price)
     rows = []
     for key, label in TRIGGERS:
@@ -303,19 +280,16 @@ def evaluate_triggers(w, i_entry, entry_price, quantity, user_return_pct):
 
 
 def combined_first_exit(w, i_entry, entry_price, quantity, user_return_pct, profit_key, stop_key):
-    """Whichever of the chosen profit-taking or stop-loss trigger fired
-    FIRST after entry -- the two-dropdown version of "if you'd exited on
-    this instead". Returns that occurrence dict, or None if neither ever
-    fired for this trade."""
+    """Returns the earliest occurrence of either chosen trigger, or None if
+    neither ever fired for this trade."""
     rows = {r["key"]: r for r in evaluate_triggers(w, i_entry, entry_price, quantity, user_return_pct)}
     candidates = [r["first"] for key in (profit_key, stop_key) if (r := rows.get(key)) and r["first"]]
     return min(candidates, key=lambda o: o["date"]) if candidates else None
 
 
 def combined_portfolio_stats(diagnosed, symbol_frames, profit_key, stop_key):
-    """Portfolio-wide win rate if every trade had been exited on whichever
-    of the two chosen triggers (one profit, one stop) fired first -- same
-    shape as one row of portfolio_stats(), for the two-dropdown comparison."""
+    """Portfolio-wide win rate if every trade had been exited on whichever of
+    the two chosen triggers (one profit, one stop) fired first."""
     returns = []
     for d in diagnosed:
         w = symbol_frames.get(d["symbol"])

@@ -1,44 +1,9 @@
 """One engine for both "backtest" and "portfolio simulation" -- daily-cadence
 sibling of kite-weekly-screener's unified_backtest.py, same trade-management
-rules, just walking daily bars instead of weekly ones.
-
-Built around a simple, single-trader workflow: scan daily, take at most
-MAX_TRADES_PER_WEEK new positions a week, size every position at a flat
-POSITION_SIZE_PCT_DEFAULT % of current equity (no pyramiding -- one fill,
-full size, at entry), and manage the exit with three rules:
-
-  - **Trailing stop**: 15% below the highest daily close seen since entry
-    (STOP_TRAIL_PCT). A ratchet -- it only ever moves up, never down.
-    Breakeven protection falls out of it automatically once a stock is up
-    more than STOP_TRAIL_PCT% (at that point the trail is already at or
-    above the entry price). No slippage haircut is applied on top of the
-    stop level (STOP_SLIPPAGE_PCT=0) -- a close-triggered stop order on
-    liquid NSE names doesn't reliably lose several extra percent beyond the
-    stop price itself, so charging that was overstating every stop-out.
-  - **Profit target**: a fixed 30% price move (TARGET_TRIGGER_PCT x
-    MIN_REWARD_RISK_MULTIPLE), deliberately NOT derived from STOP_TRAIL_PCT
-    -- widening the trailing stop for more breathing room shouldn't also
-    force a bigger move before profit gets booked. Since the actual risk
-    unit (STOP_TRAIL_PCT=15%) no longer matches the fixed 30% target
-    distance, this exit is labelled by its price move ("Booked (>= 30%
-    target)"), not as "3R", since it no longer reliably prices out to
-    exactly 3 x the real risk being taken.
-  - **Max holding period**: MAX_HOLDING_DAYS (90) calendar days after entry,
-    a position still open is force-closed at that day's close, regardless
-    of the trailing stop or target -- capital stuck sideways gets freed up
-    rather than tying up a slot indefinitely.
-
-Entry happens at the next day's open after a BREAKOUT signal on the prior
-day's close (see daily_base.detect_daily_setup_at). Same-day candidates are
-still ranked and capped at the top extra_indicators.TOP_PICKS_MAX by Score
-(the live Scanner's own "Top Picks" ranking), but a second, calendar-week
-cap (MAX_TRADES_PER_WEEK) now also limits how many NEW positions can open
-across an entire week regardless of how many days signal -- once 3 have
-been taken in the current ISO week, no more open until the next one. Still
-requires the RS-vs-NIFTY-500 filter and a minimum reward:risk at signal
-time (both unchanged from the live scanner). A flat TRANSACTION_COST_PCT
-is deducted on both the entry fill and every exit fill, approximating
-STT/brokerage/exchange charges.
+rules, just walking daily bars instead of weekly ones. Exit rules (trailing
+stop / profit target / max holding period) and per-trade sizing are the
+tunables below; see each constant's own comment for the reasoning behind
+its value.
 """
 import datetime as dt
 import json
@@ -94,25 +59,20 @@ HOLDING_EXTENSION_MIN_SCORE = 75.0   # extension is granted once, only if BOTH S
 
 
 def format_fills(fills):
-    """Human-readable one-line summary of a position's exit fills."""
     return "; ".join(
         f"{f['shares']:.0f} sh @ {round(f['price'], 2)} ({f['reason']})" for f in fills
     )
 
 
 def trail_stop_for(entry_price, highest_close_since_entry):
-    """The shared trailing-stop formula, also used by app.py's Dashboard
-    to show a live "Trail Stop (10%)" line for a logged entry -- kept here so
-    both places compute it identically."""
+    """Shared with app.py's Dashboard (live "Trail Stop" line) so both places
+    compute it identically."""
     peak = max(entry_price, highest_close_since_entry)
     return peak * (1 - STOP_TRAIL_PCT / 100)
 
 
 def _load_symbol_data(cache_dir, symbols, benchmark_daily):
-    """Per symbol: daily indicator frame (daily_base.compute_indicators,
-    further augmented with extra_indicators.compute_extra_indicators so the score
-    Score can be evaluated at any date during the walk). No resampling --
-    the cached bars are already daily."""
+    """No resampling -- the cached bars are already daily."""
     data = {}
     if not os.path.isdir(cache_dir):
         return data
@@ -144,12 +104,8 @@ def _load_symbol_data(cache_dir, symbols, benchmark_daily):
 
 
 def _open_position(symbol, i, date, entry_price, sig, position_size_pct, equity_now):
-    """Single fill, full size, no pyramiding: shares are sized to deploy
-    position_size_pct% of current equity at entry_price, full stop. The stop
-    distance (STOP_TRAIL_PCT) and reward:risk target are still computed off
-    the raw entry_price -- those are price-structure levels, not a function
-    of position size. average_entry is grossed up by TRANSACTION_COST_PCT to
-    fold entry costs into every downstream P&L calc without extra bookkeeping."""
+    """average_entry is grossed up by TRANSACTION_COST_PCT to fold entry
+    costs into every downstream P&L calc without extra bookkeeping."""
     initial_stop = entry_price * (1 - STOP_TRAIL_PCT / 100)
     shares = round(position_size_pct / 100 * equity_now / entry_price)
     if shares <= 0:
@@ -275,11 +231,10 @@ def _finalize_trade(state, exit_date, open_at_end=False):
 
 
 def summarize(trade_log, starting_capital, equity_curve):
-    """n counts every trade (closed or still-open). win_rate/expectancy/avg_r
-    are computed over CLOSED trades only ("WIN"/"LOSS" outcomes) -- a
-    still-open position hasn't been given the chance to hit either exit
-    condition yet, so counting it as an automatic non-win would understate
-    the real win rate (an open position sitting on a gain is not a loss)."""
+    """win_rate/expectancy/avg_r are computed over CLOSED trades only -- a
+    still-open position hasn't had the chance to hit either exit condition
+    yet, so counting it as an automatic non-win would understate the real
+    win rate."""
     n = len(trade_log)
     if n == 0:
         return {
@@ -320,20 +275,11 @@ def summarize(trade_log, starting_capital, equity_curve):
 def run_backtest(cache_dir, symbols=None, benchmark_daily=None,
                   starting_capital=STARTING_CAPITAL_DEFAULT, position_size_pct=POSITION_SIZE_PCT_DEFAULT,
                   on_progress=None):
-    """Runs the unified daily-cadence, capped-selection simulation over every
-    cached stock together against one shared capital pool. Every entry is a
-    single fill sized at position_size_pct% of equity (no pyramiding), and
-    at most MAX_TRADES_PER_WEEK new positions may open in any one ISO
-    calendar week, on top of the existing top-TOP_PICKS_MAX-per-day Score
-    Score ranking. Returns (summary_dict, trade_log) -- trade_log has one
-    dict per closed (or still-open, marked-to-last) position with the full
-    column set described in unified_backtest's module docstring / the app's
-    Backtest tab.
+    """Returns (summary_dict, trade_log) over one shared capital pool.
 
     on_progress: optional callback(i, total) invoked once per date in the
     chronological walk -- lets the caller drive a progress bar and signal an
-    early stop by returning True (see candle_kite/app.py's Stop-button
-    pattern elsewhere in the app)."""
+    early stop by returning True."""
     daily_data = _load_symbol_data(cache_dir, symbols, benchmark_daily)
     if not daily_data:
         return summarize([], starting_capital, []), []
@@ -425,7 +371,6 @@ def run_backtest(cache_dir, symbols=None, benchmark_daily=None,
         equity_now = cash + sum(s["remaining_shares"] * s["last_close"] for s in open_positions.values())
         equity_curve.append((date, equity_now))
 
-    # End of data: mark any still-open positions to their last known close.
     for symbol, state in open_positions.items():
         w = daily_data[symbol]
         last_close = float(w.iloc[-1]["close"])

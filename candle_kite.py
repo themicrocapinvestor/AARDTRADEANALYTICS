@@ -1,22 +1,8 @@
-"""Daily candle fetch (Kite Connect's native 'day' interval) -- daily bars are
-used as-is everywhere in this app, no resampling step, unlike the weekly
-sibling app (kite-weekly-screener) this was forked from.
-
-Kite's historical endpoint is rate-limited (roughly 3 req/sec in practice) and
-occasionally flaky, so fetches retry with backoff -- mirroring the pattern in
-the old Angel One codebase's candle.py, just against kiteconnect's exceptions
-instead. Each stock's daily candles are cached to disk per calendar day so a
-~750-stock scan only pays the network cost once per day, no matter how many
-times you press "Run scan" in the Streamlit app afterward.
-
-prefetch_daily_bulk() fetches many symbols concurrently (thread pool) instead
-of one at a time -- Kite's ~3 req/sec cap is still enforced by _rate_limiter,
-shared across every thread, so this doesn't call the API any faster than the
-limit allows; it just overlaps each request's network latency with the next
-one starting, instead of a single thread waiting on one full round trip
-before beginning the next. Cache-hit symbols (already fresh today) skip the
-limiter and the network entirely.
-"""
+"""Daily candle fetch (Kite Connect's native 'day' interval), cached to disk
+per calendar day. prefetch_daily_bulk() fetches many symbols concurrently,
+but _rate_limiter is shared across every thread, so it still caps combined
+throughput at ~3 req/sec -- concurrency only overlaps network latency, it
+doesn't call the API faster than the limit allows."""
 import concurrent.futures
 import datetime as dt
 import json
@@ -50,9 +36,8 @@ def _cache_is_fresh(path):
 
 
 class _RateLimiter:
-    """Enforces Kite's ~3 req/sec cap across however many threads are firing
-    requests concurrently -- a single shared instance, not one per thread, so
-    concurrent callers still can't exceed the combined rate."""
+    """Single shared instance, not one per thread, so concurrent callers
+    still can't exceed the combined ~3 req/sec rate."""
 
     def __init__(self, rate_per_sec=3.0):
         self._interval = 1.0 / rate_per_sec
@@ -86,7 +71,7 @@ def _fetch_with_retry(kite, token, from_date, to_date, attempts=5, base_delay=1.
 
 
 def fetch_daily(kite, token, symbol, use_cache=True):
-    """Returns a DataFrame of daily OHLCV (date index), or None if nothing came back."""
+    """Returns a DataFrame of daily OHLCV, or None if nothing came back."""
     cp = _cache_path(symbol)
     if use_cache and _cache_is_fresh(cp):
         with open(cp) as f:
@@ -114,17 +99,9 @@ def fetch_daily(kite, token, symbol, use_cache=True):
 
 
 def prefetch_daily_bulk(kite, symbol_token_pairs, use_cache=True, max_workers=5, on_progress=None):
-    """Fetches (or loads from today's cache) every (symbol, token) pair
-    concurrently, up to max_workers in flight at once. Cache-hit symbols
-    return near-instantly (no network, no rate-limit wait); cache-miss
-    symbols share _rate_limiter so total Kite calls still stay at ~3/sec
-    regardless of how many threads are running. Returns {symbol: DataFrame
-    or None}, same per-symbol value fetch_daily() would have returned.
-
-    on_progress: optional callback(done, total) invoked after each symbol
-    completes -- called from a worker thread, so the caller must only do
-    thread-safe work in it (e.g. updating a plain counter/Streamlit progress
-    bar, not touching shared mutable state without a lock)."""
+    """Returns {symbol: DataFrame or None}. on_progress: optional
+    callback(done, total) invoked after each symbol completes -- called from
+    a worker thread, so the caller must only do thread-safe work in it."""
     results = {}
     total = len(symbol_token_pairs)
     done_lock = threading.Lock()

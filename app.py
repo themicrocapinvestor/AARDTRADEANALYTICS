@@ -1,24 +1,10 @@
 """AARD Tradebook Analytics -- a brutal mirror for your own Zerodha trading history.
 
-Log in with Kite Connect, upload a Zerodha Console Tradebook export (or the
-custom 5-column template for any other broker), and this app reconstructs
-your actual round-trip trades. For whichever trade you select, it shows a
-full multi-panel technical chart (price with 20/50/150/200-day averages,
-Relative Strength, MACD, RSI), a side-by-side comparison of several
-independent exit triggers (not one prescribed "correct" exit), and a
-plain-English postmortem of what actually happened to the stock afterward.
-
-Nothing here is investment advice or a recommendation. It's a diagnostic on
-your own past decisions, using your own data, run entirely with your own
-Kite login.
-
-Demo Mode (the checkbox below the login line) renames every symbol to
-STOCK#1, STOCK#2, etc. for display -- industry/sector data stays real, only
-the ticker identity is hidden. Every fetch/score/diagnosis step underneath
-still runs on the REAL symbol; anonymization happens only at render time
-(demo_anonymize.py). It defaults ON so a screen-shared or publicly deployed
-session never accidentally shows real tickers -- turn it off explicitly for
-your own private use.
+Demo Mode (checkbox below the login line) renames every symbol to STOCK#1,
+STOCK#2, etc. for display only -- every fetch/score/diagnosis step underneath
+still runs on the REAL symbol (demo_anonymize.py). Defaults ON so a
+screen-shared or publicly deployed session never accidentally shows real
+tickers.
 """
 import os
 

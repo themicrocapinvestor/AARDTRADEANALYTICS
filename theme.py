@@ -1,18 +1,11 @@
-"""Visual identity for Trade Lookback -- dark ink background, warm-paper
-accent, two content-driven inks (red for damage, teal for what discipline
-would have done), a condensed-grotesque + mono type pairing.
+"""Visual identity: dark ink background, warm-paper accent, two content-driven
+inks (red for damage, teal for what discipline would have done).
 
-Kept deliberately minimal after the first pass: hand-rolled multi-element
-HTML fragments (card headers, two-column ledgers, condition checklists)
-rendered inconsistently across separate st.html() calls -- flex/grid layout
-and spacing frequently failed to apply, producing squished/overlapping text
-in practice. What's left here is CSS that reliably targets native Streamlit
-widgets (safe, single shared DOM) plus one small self-contained (fully
-inline-styled, no external class dependency) stamp badge for the banner.
-Per-trade content (bullets, charts, metrics) now uses native Streamlit
-components (st.markdown, st.metric, st.plotly_chart) instead of custom HTML,
-which is what actually rendered correctly.
-"""
+Kept deliberately minimal after an earlier pass: hand-rolled multi-element
+HTML fragments across separate st.html() calls had unreliable flex/grid
+layout, producing squished/overlapping text. What's left is CSS that
+reliably targets native Streamlit widgets, plus one self-contained
+inline-styled stamp badge."""
 import hashlib
 
 import streamlit as st
@@ -42,14 +35,13 @@ timeliness, merchantability, or fitness for a particular purpose, express or imp
 
 **Not affiliated.** This tool is an independent, unofficial project. It is not
 affiliated with, endorsed by, sponsored by, or in any way officially connected to
-Zerodha Broking Ltd., Kite Connect, NSE, BSE, Tiingo, NASDAQ, NYSE, S&P Dow
-Jones Indices, or any other exchange, broker, data provider, or index provider
-referenced in its output.
+Zerodha Broking Ltd., Kite Connect, NSE, BSE, or any other exchange, broker, data
+provider, or index provider referenced in its output.
 
-**Your data.** Your uploaded Tradebook/trade file(s) and your Kite credentials or
-Tiingo API key are used only within your own active session to generate
-this analysis. This tool does not sell your data to third parties. If you deploy
-or share this app yourself, you are
+**Your data.** Your uploaded Tradebook/trade file(s) and your Kite credentials
+are used only within your own active session to generate this analysis. This
+tool does not sell your data to third parties. If you deploy or share this app
+yourself, you are
 responsible for how you configure storage, logging, and access for your own
 deployment.
 

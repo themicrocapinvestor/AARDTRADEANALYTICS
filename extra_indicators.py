@@ -1,30 +1,19 @@
-"""Composite technical score -- 8 equal-weighted (1/8 each) binary conditions,
-all evaluated on the same daily bar, folding trend/momentum/RS/volume into
-one 0-100 read alongside the individual indicator columns (EMAs, MACD, RSI,
-volume MA, 252-day low/high, ATR-based stop lines, a volatility stop) used
-throughout this app.
-
-Conditions 1-3 and 6 use the Minervini Trend Template's three moving
-averages, at their literal Daily 50/150/200-day EMA periods (see
-EMA_MED/EMA_LONG/EMA_XLONG below):
+"""Composite technical score -- 8 equal-weighted binary conditions on the same
+daily bar (trend/momentum/RS/volume), folded into one 0-100 read:
   1. Close > 50-day EMA (Minervini)
   2. 50-day EMA > 150-day EMA (Minervini)
   3. 150-day EMA > 200-day EMA (Minervini)
   4. MACD(12,26,9) line > signal
   5. RSI(14) in [50, 65]
-  6. Stage Analysis == "Stage 2" (daily_base.stage()'s SMA50/150/200 + RS
-     lens -- the same canonical Stage read used everywhere else in this
-     app, so the entry read and the score can't quietly disagree about
-     Stage; a close SMA-based sibling of conditions 1-3's EMA-based stack,
-     with RS and each MA's own slope added as extra bars)
+  6. Stage Analysis == "Stage 2" (daily_base.stage() -- same canonical Stage
+     read used everywhere else, so the entry read and the score can't
+     quietly disagree)
   7. RS (60-day vs Nifty 500) > 0
   8. Volume > 20-day volume SMA
 
-Score = round(hits / 8 * 100).
-
-Golden Setup: Stage 2 AND Score > 70 AND the volatility stop is in an
-uptrend AND the Minervini Trend Template is met AND RS > 0 -- five strong
-reads at once, not just a high score.
+Score = round(hits / 8 * 100). Golden Setup: Stage 2 AND Score > 70 AND the
+volatility stop is in an uptrend AND the Minervini Trend Template is met AND
+RS > 0 -- five strong reads at once, not just a high score.
 """
 import numpy as np
 import pandas as pd
@@ -45,7 +34,7 @@ ATR_LEN_STOPLINE = 14
 ATR_STOPLINE_MULT = 2.0
 MINERVINI_52W_LOW_BUFFER_PCT = 25.0
 MINERVINI_52W_HIGH_BUFFER_PCT = 25.0
-MINERVINI_EMA200_SLOPE_DAYS = 20  # daily_base's STAGE_SLOPE_LOOKBACK_DAYS -- same ~1-month slope window
+MINERVINI_EMA200_SLOPE_DAYS = 20  # same ~1-month slope window as daily_base's STAGE_SLOPE_LOOKBACK_DAYS
 GOLDEN_SETUP_SCORE_MIN = 70
 
 TOTAL_CONDITIONS = 8
@@ -56,8 +45,7 @@ def _ema(s, n):
 
 
 def _rma(s, n):
-    """Wilder's smoothing -- what TradingView's ta.rsi actually uses under the
-    hood, not a plain SMA of gains/losses."""
+    """Wilder's smoothing, not a plain SMA of gains/losses."""
     return s.ewm(alpha=1.0 / n, adjust=False).mean()
 
 
@@ -83,11 +71,9 @@ def _atr_abs(w, n):
 
 
 def _volatility_stop(close, atr, factor=VSTOP_FACTOR):
-    """Chandelier-style volatility stop with trend-flip reset. Returns
-    (stop, uptrend) Series aligned to close's index. Stateful/sequential by
-    construction (each bar's stop depends on the previous bar's regime), so
-    this loops rather than vectorizes -- fine at daily-bar row counts (a few
-    thousand per symbol)."""
+    """Chandelier-style volatility stop with trend-flip reset. Stateful by
+    construction (each bar depends on the previous bar's regime), so this
+    loops rather than vectorizes -- fine at daily-bar row counts."""
     n = len(close)
     stop = np.full(n, np.nan)
     uptrend = np.zeros(n, dtype=bool)
@@ -115,12 +101,9 @@ def _volatility_stop(close, atr, factor=VSTOP_FACTOR):
 
 
 def compute_extra_indicators(w, beta=None):
-    """w: the daily indicator DataFrame from daily_base.compute_indicators
-    (must already have 'rolling_high_252d', and 'rs_60' if RS-dependent
-    conditions are to work). beta: optional Series from
-    relative_strength.compute_beta, aligned onto w's index. Returns a copy of
-    w with the additional columns this module needs -- EMAs, MACD, RSI,
-    volume MA, 252-day low, ATR-based stop lines, volatility stop, and beta."""
+    """w must already have 'rolling_high_252d', and 'rs_60' if RS-dependent
+    conditions are to work. Returns a copy of w with the additional columns
+    this module needs."""
     w = w.copy()
     w["ema50"] = _ema(w["close"], EMA_MED)
     w["ema150"] = _ema(w["close"], EMA_LONG)
@@ -145,11 +128,9 @@ def compute_extra_indicators(w, beta=None):
 
 
 def supertrend(w, atr_period=10, mult=3.0):
-    """Standard ATR-band flip indicator on the daily frame. Returns
-    (line, direction) Series aligned to w's index -- direction is True while
-    the trend is up (line sits below price, acting as a trailing stop),
-    False while down (line sits above price, acting as a trailing cap).
-    Stateful/sequential by construction, same pattern as _volatility_stop."""
+    """Standard ATR-band flip indicator. direction is True while the trend is
+    up (line sits below price, acting as a trailing stop), False while down
+    (line sits above price, acting as a trailing cap)."""
     atr = _atr_abs(w, atr_period)
     hl2 = (w["high"] + w["low"]) / 2
     upper_band = hl2 + mult * atr
@@ -172,10 +153,8 @@ def supertrend(w, atr_period=10, mult=3.0):
             direction[i] = cur_up
             continue
         if not started:
-            # First bar with a real ATR reading -- bootstrap the bands here
-            # rather than at i==0, where atr (and so ub/lb) is still NaN
-            # during the warm-up window; seeding from a NaN would poison
-            # every subsequent max()/min() comparison forever.
+            # Bootstrap here, not at i==0, where atr is still NaN during
+            # warm-up -- seeding from NaN would poison every later comparison.
             final_upper, final_lower = float(ub), float(lb)
             started = True
         else:
@@ -192,8 +171,7 @@ def supertrend(w, atr_period=10, mult=3.0):
 
 
 def adx(w, n=14):
-    """Standard Wilder ADX/+DI/-DI on the daily frame. Returns a DataFrame
-    with adx/plus_di/minus_di columns aligned to w's index."""
+    """Standard Wilder ADX/+DI/-DI."""
     up_move = w["high"].diff()
     down_move = -w["low"].diff()
     plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=w.index)
@@ -213,8 +191,7 @@ def adx(w, n=14):
 
 
 def minervini_ok(w, i):
-    """The literal daily Minervini Trend Template: close > 50-day EMA >
-    150-day EMA > 200-day EMA, the 200-day EMA rising over the lookback,
+    """close > 50-day EMA > 150-day EMA > 200-day EMA, 200-day EMA rising,
     price >=25% above the 252-day low, and within 25% of the 252-day high."""
     row = w.iloc[i]
     if i < MINERVINI_EMA200_SLOPE_DAYS or pd.isna(row.get("ema200")):
@@ -238,17 +215,12 @@ _default_stage_fn = None  # resolved lazily, once, on first score_at() call -- s
 
 
 def score_at(w, i, stage_fn=None):
-    """w: a daily frame already run through daily_base.compute_indicators
-    AND compute_extra_indicators. stage_fn: which Stage lens to use for
-    condition 6 and the "stage" field -- defaults to daily_base.stage() (the
-    same 60d/130d SMA read used everywhere else). That default is resolved
-    via a lazy import (to avoid a module-load-time circular import with
-    daily_base, which imports adx() from this module), but cached in
-    _default_stage_fn after the first call, since score_at() can run once
-    per candidate per date in a hot backtest loop. Returns None if there
-    isn't enough history yet for all 8 conditions, else a dict: pct (0-100),
-    hits (0-8), stage, minervini (bool), vstop_uptrend (bool or None),
-    golden_setup (bool)."""
+    """stage_fn defaults to daily_base.stage(), resolved via a lazy import to
+    avoid a module-load-time circular import with daily_base (which imports
+    adx() from this module) -- cached in _default_stage_fn after the first
+    call since score_at() can run once per candidate per date in a hot
+    backtest loop. Returns None if there isn't enough history yet for all 8
+    conditions."""
     global _default_stage_fn
     if stage_fn is None:
         if _default_stage_fn is None:
@@ -290,18 +262,13 @@ def score_at(w, i, stage_fn=None):
 
 
 def top_picks(candidates, top_n=TOP_PICKS_MAX, min_score=None):
-    """candidates: list of dicts, each with 'symbol', 'score_pct', and
-    'momentum_score_pct' (None allowed, sorted last). Ties broken by
-    rs_60_pct, then momentum_return_pct, both descending. Returns
-    {symbol: score_pct} for the top `top_n`.
+    """Ties broken by rs_60_pct, then momentum_return_pct, both descending.
 
     min_score: if given, a candidate is only eligible once BOTH its
     composite Score AND its Momentum Score clear this bar -- a strong
-    composite Score alone (good trend/structure) isn't enough if price/
-    volume momentum right now doesn't confirm it, and vice versa. Missing
-    either score (not enough history yet) makes a candidate ineligible
-    rather than passing it through unconfirmed. A weak day yields fewer
-    than top_n picks instead of forcing weak ones through to fill the quota."""
+    composite Score alone isn't enough if price/volume momentum doesn't
+    confirm it, and vice versa. A weak day yields fewer than top_n picks
+    instead of forcing weak ones through to fill the quota."""
     ranked = sorted(
         candidates,
         key=lambda c: (

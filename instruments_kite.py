@@ -1,10 +1,6 @@
 """Kite NSE instrument master: fetch, cache, symbol -> token map.
 
-`kite.instruments("NSE")` returns the full daily-refreshed dump (every listed
-NSE instrument -- equities, indices, ETFs). Cached to disk for a few hours
-since it's a multi-MB pull and only changes once a day; every script/page in
-this app reuses the same cache within that window instead of re-fetching.
-"""
+Cached to disk for a few hours since it's a multi-MB daily-refreshed dump."""
 import datetime as dt
 import json
 import os
@@ -33,8 +29,7 @@ def fetch_nse_instruments(kite, use_cache=True):
 
 
 def build_symbol_token_map(instruments):
-    """{tradingsymbol: instrument_token} restricted to plain NSE cash equities
-    (segment == 'NSE', instrument_type == 'EQ') -- excludes indices/ETFs/etc."""
+    """Restricted to plain NSE cash equities -- excludes indices/ETFs/etc."""
     return {
         row["tradingsymbol"]: row["instrument_token"]
         for row in instruments
@@ -43,10 +38,7 @@ def build_symbol_token_map(instruments):
 
 
 def find_index_token(instruments, tradingsymbol="NIFTY 500"):
-    """Instrument token for an NSE index (segment 'INDICES') by exact
-    tradingsymbol match -- used to fetch the NIFTY 500 index as the
-    relative-strength benchmark (see relative_strength.py). Returns None if
-    not found, so RS just gets skipped rather than the app breaking."""
+    """Returns None if not found, so RS just gets skipped rather than the app breaking."""
     for row in instruments:
         if row.get("segment") == "INDICES" and row.get("tradingsymbol") == tradingsymbol:
             return row["instrument_token"]

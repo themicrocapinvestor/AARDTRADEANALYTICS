@@ -1,15 +1,7 @@
 """Turns mistake_diagnosis.py's tagged trade dicts into the brutal-mirror
 copy -- deliberately mocking, but every line cites a real number/date/level
 from the diagnosis, never a generic insult and never the raw internal
-condition/checklist names the scoring runs on internally. Tone and
-plain-English translation both live here, decoupled from the scoring math
-in mistake_diagnosis.py.
-
-all_bullets() is the one function app.py actually renders per trade: a flat
-7-8 bullet list mixing the entry mistake, the exit-timing verdict, and a
-genuine post-exit price-action story (what carried the move, and the actual
-date/price/level where the trend broke) -- not three separate jargon-heavy
-sections.
+condition/checklist names the scoring runs on internally.
 """
 import random
 
@@ -85,8 +77,7 @@ def _pick(tag, symbol, lines_dict=None):
 
 
 def roast_trade(diag, clean_count=0, currency="₹"):
-    """Plain-English bullet(s) about the ENTRY/EXIT decision -- one per
-    non-'clean' tag (a trade can have multiple mistakes stacked)."""
+    """One bullet per non-'clean' tag -- a trade can have multiple mistakes stacked."""
     lines = []
     entry_ctx, systematic = diag["entry_context"], diag["systematic"]
     for tag in diag["tags"]:
@@ -114,12 +105,8 @@ def roast_trade(diag, clean_count=0, currency="₹"):
 
 
 def aftermath_story_bullets(diag, currency="₹"):
-    """The actual price-action postmortem: what carried the stock after the
-    user's exit, and -- concretely, with a real date/price/level -- where
-    the trend broke. Built entirely from mistake_diagnosis._aftermath_context
-    facts (peak/trough/trend_break), never from internal condition/score
-    names. This is the "what happened to the trade after exit" analysis,
-    independent of whether the exit itself was a good decision."""
+    """Built entirely from mistake_diagnosis._aftermath_context facts
+    (peak/trough/trend_break), never from internal condition/score names."""
     a = diag.get("aftermath") or {}
     tags = a.get("aftermath_tags", [])
     symbol = diag["symbol"]
@@ -178,17 +165,13 @@ def aftermath_story_bullets(diag, currency="₹"):
 
 
 def all_bullets(diag, clean_count=0, currency="₹"):
-    """The single flat bullet list app.py renders per trade -- entry/exit
-    decision quality first, then the post-exit price-action story, in one
-    voice. This replaces the old three-separate-sections layout (roast /
-    condition checklist / aftermath) with one clean list."""
+    """Entry/exit decision quality first, then the post-exit price-action story, in one voice."""
     bullets = roast_trade(diag, clean_count=clean_count, currency=currency) + aftermath_story_bullets(diag, currency=currency)
     return bullets
 
 
 def mistake_frequency(diagnosed):
-    """{tag: count} across every diagnosed trade, sorted worst (most
-    frequent, excluding 'clean') first."""
+    """Sorted worst (most frequent, excluding 'clean') first."""
     freq = {}
     for d in diagnosed:
         for tag in d["tags"]:
@@ -205,10 +188,9 @@ def leaderboard(diagnosed, worst_n=10):
 
 
 def backtest_stats(diagnosed):
-    """Win rate, risk:reward, expectancy, and days-held spread across every
-    closed trade -- computed straight from each trade's own entry/exit price
-    and date, independent of the systematic-replay comparison the rest of
-    this report is built around."""
+    """Computed straight from each trade's own entry/exit price and date,
+    independent of the systematic-replay comparison the rest of this report
+    is built around."""
     if not diagnosed:
         return None
     n = len(diagnosed)
@@ -271,13 +253,10 @@ def summary_roast(diagnosed, currency="₹"):
 
 
 def top_bottom_trades(diagnosed, n=3):
-    """Best n_trades / worst n_trades by user_return_pct (not impact_rupees --
-    leaderboard() above is about the biggest MISTAKES vs. the systematic
-    replay; this is just "which trades actually did best/worst for you,
-    full stop"). Returns (best, worst), each sorted so the most extreme
-    trade comes first; both lists are capped at n even if there are fewer
-    than 2n trades total (a trade can appear in both if there are <= n
-    trades overall -- acceptable for a small trade count, not hidden)."""
+    """By user_return_pct, not impact_rupees -- leaderboard() above is about
+    the biggest MISTAKES vs. the systematic replay; this is just
+    best/worst-for-you, full stop. A trade can appear in both lists if there
+    are <= n trades overall."""
     if not diagnosed:
         return [], []
     best = sorted(diagnosed, key=lambda d: d["user_return_pct"], reverse=True)[:n]
@@ -286,14 +265,10 @@ def top_bottom_trades(diagnosed, n=3):
 
 
 def _benchmark_monthly_returns(benchmark_daily):
-    """{(year, month): pct_return} for every calendar month present in
-    benchmark_daily's index -- each month's return is its last close vs.
-    the PRIOR month's last close (proper month-over-month return, not just
-    first-vs-last-within-the-month, which would miss the gap over month
-    boundaries). The very first month in the series has no prior close to
-    compare against, so it's computed against its own first close instead
-    (the only bar with no better reference available) and excluded from
-    ranking is left to the caller, not enforced here."""
+    """Each month's return is its last close vs. the PRIOR month's last close
+    (not first-vs-last-within-the-month, which would miss the gap over month
+    boundaries). The first month in the series has no prior close, so it's
+    computed against its own first close instead."""
     if benchmark_daily is None or benchmark_daily.empty:
         return {}
     grouped = benchmark_daily["close"].groupby(
@@ -316,15 +291,7 @@ _MONTH_NAMES = [
 
 
 def monthly_returns(diagnosed, benchmark_daily=None):
-    """Groups closed trades by EXIT month (that's when the P&L actually
-    landed) and returns one dict per month that had at least one trade,
-    sorted chronologically: {month_label (e.g. "September '26", for
-    display), sort_key ('YYYY-MM', chronological sort only -- not for
-    display), n_trades, avg_return_pct (plain mean of user_return_pct for
-    trades exiting that month -- same convention as backtest_stats'
-    expectancy_pct, just sliced by month), total_pnl_rupees,
-    nifty_return_pct (None if no benchmark data was available for that
-    month)}."""
+    """Groups closed trades by EXIT month -- that's when the P&L actually landed."""
     buckets = {}
     for d in diagnosed:
         key = (d["exit_date"].year, d["exit_date"].month)
@@ -347,11 +314,7 @@ def monthly_returns(diagnosed, benchmark_daily=None):
 
 
 def best_worst_months(diagnosed, benchmark_daily=None, n=3):
-    """(best, worst) month dicts from monthly_returns(), ranked by
-    avg_return_pct -- best first in the best list, worst first in the
-    worst list. Both capped at n even if there are fewer than 2n distinct
-    months (a month can appear in both lists if there are <= n months
-    total)."""
+    """A month can appear in both lists if there are <= n months total."""
     months = monthly_returns(diagnosed, benchmark_daily)
     best = sorted(months, key=lambda x: x["avg_return_pct"], reverse=True)[:n]
     worst = sorted(months, key=lambda x: x["avg_return_pct"])[:n]
@@ -442,20 +405,9 @@ def _and_join_bold(labels):
 
 
 def investor_narrative(investor_profile):
-    """Turns behavioral_profile.investor_profile()'s trait scorecard into
-    flowing prose -- 2-3 paragraphs in the same second-person, evidence-
-    cited voice as the rest of this app's copy (every claim still traces
-    back to a real count/percentage from the evidence strings, nothing
-    added here is invented), instead of a bare scorecard + progress bars +
-    a dropdown someone has to click through to see the reasoning. Returns a
-    list of paragraph strings (app.py renders one st.markdown per
-    paragraph), or [] if there's nothing to profile.
-
-    Paragraph 1 covers the dominant pattern(s) (the ones investor_profile()
-    already flagged as dominant -- score x confidence > 0.15). Paragraph 2,
-    if there's anything left, covers secondary patterns that showed up but
-    didn't rise to "dominant." A closing paragraph carries the same
-    correlational-not-clinical caveat this section has always shown."""
+    """Every claim still traces back to a real count/percentage from the
+    evidence strings -- nothing added here is invented. Returns a list of
+    paragraph strings, or [] if there's nothing to profile."""
     if investor_profile is None or not investor_profile["traits"]:
         return []
 
@@ -495,9 +447,4 @@ def investor_narrative(investor_profile):
 
 
 def build_report(diagnosed, currency="₹"):
-    """Full structure app.py renders: aggregate summary, plus every
-    diagnosed trade (app.py sorts/displays these in a selectable table and
-    computes the bullet list + trigger chart lazily only for whichever
-    trade the user has selected, rather than precomputing for all of
-    them)."""
     return {"summary": summary_roast(diagnosed, currency=currency), "all_trades": diagnosed}

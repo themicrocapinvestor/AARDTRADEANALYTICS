@@ -1,21 +1,13 @@
-"""Scores each closed round-trip trade (from tradebook_parser) against the
-same technical machinery the sibling scanner apps use for live signals --
-daily_base.stage()/momentum_score(), extra_indicators.score_at(), and
-relative_strength -- evaluated at the trade's actual entry/exit dates
-instead of "today". Also replays a systematic exit (unified_backtest's own
-trailing-stop/target/max-holding rules) forward from the same entry to get
-a counterfactual: what would have happened if discipline, not feeling, had
-decided the exit.
+"""Scores each closed round-trip trade against daily_base.stage()/momentum_score(),
+extra_indicators.score_at(), and relative_strength, evaluated at the trade's actual
+entry/exit dates instead of "today". Also replays a systematic exit
+(unified_backtest's own trailing-stop/target/max-holding rules) forward from the
+same entry to get a counterfactual: what would have happened if discipline, not
+feeling, had decided the exit.
 
-Nothing here invents a new scoring system -- every read (Stage, the composite score,
-RS, ATR%, trailing-stop distance) is the same formula/threshold already
-tuned and used by kite-daily-screener and sector-rotation-app. This module
-just points those formulas at historical dates instead of the latest bar.
-
-Symbols that don't resolve to a plain NSE cash-equity instrument token (ETFs,
-BSE-only listings, delisted/renamed symbols) are skipped with a reported
-count -- the Minervini/Stage/base machinery is equity-specific and would be
-noise applied to a gold ETF's price series.
+Symbols that don't resolve to a plain NSE cash-equity instrument token are
+skipped with a reported count -- the Minervini/Stage/base machinery is
+equity-specific and would be noise applied to a gold ETF's price series.
 """
 import datetime as dt
 
@@ -55,10 +47,8 @@ DEAD_MONEY_BAND_PCT = 5.0              # |30-trading-day post-exit return| below
 
 
 def resolve_token(symbol, symbol_token_map, instruments):
-    """symbol_token_map: instruments_kite.build_symbol_token_map(instruments)
-    output (NSE cash equities only). Falls back to any NSE-segment row for
-    the symbol (covers instrument_type values other than plain 'EQ', e.g.
-    some ETFs) before giving up."""
+    """Falls back to any NSE-segment row for the symbol (covers
+    instrument_type values other than plain 'EQ', e.g. some ETFs)."""
     token = symbol_token_map.get(symbol)
     if token:
         return token
@@ -69,10 +59,7 @@ def resolve_token(symbol, symbol_token_map, instruments):
 
 
 def required_lookback_days(trades, today=None):
-    """DAILY_LOOKBACK_DAYS isn't the sibling apps' fixed 1095/548 -- it has
-    to cover the earliest trade's entry date plus warm-up room, per the
-    kite-stock-app-patterns skill's "recompute per app" rule. Returns the
-    number of days back from today candle_kite should fetch."""
+    """Has to cover the earliest trade's entry date plus warm-up room."""
     today = today or dt.date.today()
     if not trades:
         return MIN_HISTORY_DAYS + 30
@@ -82,10 +69,7 @@ def required_lookback_days(trades, today=None):
 
 
 def prepare_symbol_frame(daily, benchmark_daily):
-    """daily: raw OHLCV DataFrame for one symbol (candle_kite.fetch_daily
-    output). Returns the fully-augmented indicator frame (daily_base +
-    extra_indicators columns, RS included) used for every entry/exit lookup below,
-    or None if there isn't enough history."""
+    """Returns None if there isn't enough history."""
     if daily is None or len(daily) < MIN_HISTORY_DAYS:
         return None
     rs = compute_rs_all(daily, benchmark_daily)
@@ -97,10 +81,9 @@ def prepare_symbol_frame(daily, benchmark_daily):
 
 
 def _index_at_or_before(w, date):
-    """Integer position of the last trading day at or before `date` -- entry/
-    exit fills always land on an actual trading day, but a defensive nearest-
-    prior lookup handles any date drift between the tradebook and Kite's
-    daily bar calendar. Returns None if `date` is before the frame starts."""
+    """A defensive nearest-prior lookup handles any date drift between the
+    tradebook and Kite's daily bar calendar. Returns None if `date` is
+    before the frame starts."""
     idx = w.index.searchsorted(date, side="right") - 1
     if idx < 0:
         return None
@@ -114,22 +97,11 @@ def _bool_or_none(val):
 
 
 def _condition_breakdown(w, i, rs_60, rs_123):
-    """The 13 individual pass/fail reads that used to be hidden behind two
-    named composites (extra_indicators.score_at's 8-condition Score,
-    daily_base.momentum_score's 5-condition Momentum Score). Same exact
-    comparisons/thresholds those two functions use internally -- this
-    doesn't recompute anything differently, it just stops collapsing the
-    detail into a single percentage before showing it. rs_60/rs_123: passed
-    in from the caller (already extracted in diagnose_trade) rather than
-    re-read from the row here, so there's one source of truth for those two
-    values across the whole diagnosis.
-
-    Returns (conditions, clumsy_score) -- conditions is {name: True/False/
-    None (None = not enough history to evaluate yet, doesn't count against
-    or for the score)}, clumsy_score is 100 - (hits / evaluable * 100),
-    i.e. the SHARE of evaluable conditions that were absent at entry --
-    higher means more of the standard "this is a good trade" boxes were
-    unticked, the opposite direction from the old scores it replaces."""
+    """The 13 individual pass/fail reads behind extra_indicators.score_at's
+    8-condition Score and daily_base.momentum_score's 5-condition Momentum
+    Score. clumsy_score is 100 - (hits / evaluable * 100) -- the share of
+    evaluable conditions that were absent at entry, the opposite direction
+    from the scores it's derived from."""
     row = w.iloc[i]
     stage_now = stage(w, i)
     rs_ok = bool(rs_60 is not None and rs_60 > 0)
@@ -189,9 +161,7 @@ def _exit_context(w, i):
 
 
 def _stage_run_length_before(w, i, target_stages=("Stage 3", "Stage 4")):
-    """Calendar days (approximated as trading-day count -- close enough for
-    a threshold check) immediately before index i where stage() was already
-    in target_stages, walking backward until it wasn't."""
+    """Trading-day count, not calendar days -- close enough for a threshold check."""
     n = 0
     j = i
     while j >= 0 and stage(w, j) in target_stages:
@@ -201,17 +171,10 @@ def _stage_run_length_before(w, i, target_stages=("Stage 3", "Stage 4")):
 
 
 def systematic_replay(w, i_entry, entry_price):
-    """Walks forward from the bar AFTER i_entry using unified_backtest's own
-    trailing-stop / profit-target / max-holding rules (no pyramiding, no
-    holding-extension -- the simple version, since this is a single-trade
-    counterfactual, not a shared-capital simulation). Returns a dict with
-    the systematic exit date/price/reason/return_pct, or None if there
-    isn't a next bar to walk from.
-
-    This answers "what would discipline alone have done with this exact
-    entry", independent of whatever the user actually did -- the gap
-    between this and the user's real exit is where the mistake tags in
-    diagnose_trade() come from."""
+    """Uses unified_backtest's rules but the simple version (no pyramiding,
+    no holding-extension), since this is a single-trade counterfactual, not
+    a shared-capital simulation. Returns None if there isn't a next bar to
+    walk from."""
     if i_entry + 1 >= len(w):
         return None
     highest_close = entry_price
@@ -251,23 +214,12 @@ def _systematic_result(w, i, exit_price, entry_price, reason):
 
 
 def _aftermath_context(w, i_exit, exit_price):
-    """What actually happened to the stock AFTER the user's own exit --
-    independent of the systematic-replay comparison in systematic_replay()/
-    diagnose_trade(). A disciplined exit can still be followed by a huge
-    run (the stop wasn't wrong, the stock just kept going) or a crash (the
-    exit was dead right); this captures that separately rather than folding
-    it into the decision-quality `tags`.
-
-    checkpoints: {trading-day offset from exit: return_pct at that bar},
-    for whichever of POST_EXIT_CHECKPOINT_DAYS the available history reaches
-    (offsets are trading-day counts, matching how every other day-count in
-    this app's indicator stack is measured -- not calendar days).
-    aftermath_tags: 'sold_too_early' (stock ran >= SOLD_TOO_EARLY_MIN_RUN_PCT
-    further at any point after exit), 'exit_vindicated' (stock fell >=
-    EXIT_VINDICATED_MIN_DROP_PCT at any point after exit -- both can fire
-    together on a whipsaw), 'dead_money' (30-bar checkpoint return within
-    +/-DEAD_MONEY_BAND_PCT and neither of the above fired), or
-    'too_recent'/'no_clear_verdict' as fallbacks."""
+    """What happened to the stock AFTER the user's own exit, independent of
+    the systematic-replay comparison -- a disciplined exit can still be
+    followed by a huge run or a crash, so this is tracked separately from
+    the decision-quality `tags`. checkpoint offsets are trading-day counts,
+    not calendar days. aftermath_tags: 'sold_too_early'/'exit_vindicated'
+    can both fire together on a whipsaw."""
     last_idx = len(w) - 1
     bars_after = last_idx - i_exit
     checkpoints = {
@@ -328,13 +280,10 @@ def _aftermath_context(w, i_exit, exit_price):
 
 
 def diagnose_trade(trade, w):
-    """trade: one dict from tradebook_parser.build_roundtrip_trades. w: that
-    symbol's prepared indicator frame (prepare_symbol_frame). Returns None if
-    the entry date falls before the frame has enough warm-up history.
-    Otherwise a dict: entry_context, exit_context, systematic (counterfactual
-    replay), tags (list of mistake codes), and impact_rupees (positive =
-    rupees left on the table vs. discipline, negative = the user's actual
-    exit outperformed the systematic replay -- their instinct was right)."""
+    """Returns None if the entry date falls before the frame has enough
+    warm-up history. impact_rupees: positive = rupees left on the table vs.
+    discipline, negative = the user's actual exit outperformed the
+    systematic replay -- their instinct was right."""
     i_entry = _index_at_or_before(w, trade["entry_date"])
     i_exit = _index_at_or_before(w, trade["exit_date"])
     if i_entry is None or i_exit is None or i_entry < MIN_HISTORY_DAYS - 1:
@@ -392,11 +341,8 @@ def diagnose_trade(trade, w):
 
 
 def diagnose_all(trades, symbol_frames):
-    """trades: list from build_roundtrip_trades. symbol_frames: {symbol:
-    prepared indicator frame or None}. Returns (diagnosed, skipped) --
-    skipped is a list of (symbol, reason) for trades that couldn't be
-    scored (no resolvable frame, or not enough warm-up history), reported
-    rather than silently dropped."""
+    """Returns (diagnosed, skipped) -- skipped trades are reported rather
+    than silently dropped."""
     diagnosed, skipped = [], []
     for trade in trades:
         w = symbol_frames.get(trade["symbol"])
