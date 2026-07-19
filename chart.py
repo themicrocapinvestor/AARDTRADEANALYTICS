@@ -260,7 +260,14 @@ def trade_chart(w, diag, triggers, gann_levels=None):
         template="plotly_dark",
         height=1300,
         margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=12)),
+        # y=1.02 sits just above the plot's own paper area, which the app's
+        # light/dark mode toggle otherwise leaves uncovered (whatever's
+        # behind the chart shows through there) -- an explicit bgcolor here
+        # guarantees the legend always has its own dark backing rectangle
+        # for the light-colored text to sit on, regardless of page theme.
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                     font=dict(size=12, color=INK), bgcolor="rgba(27,30,39,0.85)",
+                     bordercolor=GRID, borderwidth=1),
         paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
         font=dict(color=INK, family="IBM Plex Sans, sans-serif", size=13),
         hovermode="x unified",

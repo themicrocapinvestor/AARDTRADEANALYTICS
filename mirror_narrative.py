@@ -270,6 +270,221 @@ def summary_roast(diagnosed, currency="₹"):
     }
 
 
+def top_bottom_trades(diagnosed, n=3):
+    """Best n_trades / worst n_trades by user_return_pct (not impact_rupees --
+    leaderboard() above is about the biggest MISTAKES vs. the systematic
+    replay; this is just "which trades actually did best/worst for you,
+    full stop"). Returns (best, worst), each sorted so the most extreme
+    trade comes first; both lists are capped at n even if there are fewer
+    than 2n trades total (a trade can appear in both if there are <= n
+    trades overall -- acceptable for a small trade count, not hidden)."""
+    if not diagnosed:
+        return [], []
+    best = sorted(diagnosed, key=lambda d: d["user_return_pct"], reverse=True)[:n]
+    worst = sorted(diagnosed, key=lambda d: d["user_return_pct"])[:n]
+    return best, worst
+
+
+def _benchmark_monthly_returns(benchmark_daily):
+    """{(year, month): pct_return} for every calendar month present in
+    benchmark_daily's index -- each month's return is its last close vs.
+    the PRIOR month's last close (proper month-over-month return, not just
+    first-vs-last-within-the-month, which would miss the gap over month
+    boundaries). The very first month in the series has no prior close to
+    compare against, so it's computed against its own first close instead
+    (the only bar with no better reference available) and excluded from
+    ranking is left to the caller, not enforced here."""
+    if benchmark_daily is None or benchmark_daily.empty:
+        return {}
+    grouped = benchmark_daily["close"].groupby(
+        [benchmark_daily.index.year, benchmark_daily.index.month]
+    ).agg(["first", "last"])
+    result = {}
+    prior_close = None
+    for (y, m), row in grouped.iterrows():
+        base = prior_close if prior_close is not None else row["first"]
+        if base:
+            result[(y, m)] = round((row["last"] / base - 1) * 100, 2)
+        prior_close = row["last"]
+    return result
+
+
+def monthly_returns(diagnosed, benchmark_daily=None):
+    """Groups closed trades by EXIT month (that's when the P&L actually
+    landed) and returns one dict per month that had at least one trade,
+    sorted chronologically: {month_label ('YYYY-MM'), n_trades,
+    avg_return_pct (plain mean of user_return_pct for trades exiting that
+    month -- same convention as backtest_stats' expectancy_pct, just
+    sliced by month), total_pnl_rupees, nifty_return_pct (None if no
+    benchmark data was available for that month)}."""
+    buckets = {}
+    for d in diagnosed:
+        key = (d["exit_date"].year, d["exit_date"].month)
+        buckets.setdefault(key, []).append(d)
+
+    bench_monthly = _benchmark_monthly_returns(benchmark_daily)
+
+    months = []
+    for (y, m), trades in buckets.items():
+        months.append({
+            "month_label": f"{y}-{m:02d}",
+            "n_trades": len(trades),
+            "avg_return_pct": round(sum(t["user_return_pct"] for t in trades) / len(trades), 1),
+            "total_pnl_rupees": round(sum(t["pnl_rupees"] for t in trades), 2),
+            "nifty_return_pct": bench_monthly.get((y, m)),
+        })
+    months.sort(key=lambda x: x["month_label"])
+    return months
+
+
+def best_worst_months(diagnosed, benchmark_daily=None, n=3):
+    """(best, worst) month dicts from monthly_returns(), ranked by
+    avg_return_pct -- best first in the best list, worst first in the
+    worst list. Both capped at n even if there are fewer than 2n distinct
+    months (a month can appear in both lists if there are <= n months
+    total)."""
+    months = monthly_returns(diagnosed, benchmark_daily)
+    best = sorted(months, key=lambda x: x["avg_return_pct"], reverse=True)[:n]
+    worst = sorted(months, key=lambda x: x["avg_return_pct"])[:n]
+    return best, worst
+
+
+_SEVERITY_WORDS = {
+    (0.7, 1.01): "This one's not subtle -- ",
+    (0.4, 0.7): "This shows up clearly -- ",
+    (0.0, 0.4): "There's a mild version of this here -- ",
+}
+
+# Within one trait's own evidence sentences (rare -- most traits cite just one).
+_JOIN_WORDS = ["On top of that, ", "And ", "Alongside that, ", "There's also this: "]
+# Between two DIFFERENT traits in the same paragraph -- a separate pool so a
+# profile with several dominant traits doesn't repeat the same transition
+# (or the same severity phrase) three times in a row.
+_TRAIT_JOIN_WORDS = ["Then there's the fact that ", "On top of that, ", "Add to that: ", "And separately, "]
+
+
+def _severity_lead(score):
+    for (lo, hi), text in _SEVERITY_WORDS.items():
+        if lo <= score < hi:
+            return text
+    return ""
+
+
+def _lowercase_first(s):
+    return s[0].lower() + s[1:] if s else s
+
+
+def _clean_evidence(e):
+    """"Example: X" reads like a caption, not a sentence -- rephrase it as a
+    clause that actually joins the flow of a paragraph. NOT lowercased --
+    what follows is usually a ticker/proper noun (e.g. "RELIANCE entered
+    ..."), and lowercasing its first letter would mangle it."""
+    if e.startswith("Example: "):
+        return "for instance, " + e[len("Example: "):]
+    return e
+
+
+def _join_evidence(evidence_sentences, seed):
+    """Stitches a trait's own evidence bullet(s) into flowing prose instead
+    of a list -- the first sentence stands alone, any further sentences for
+    the SAME trait get a light connector picked from _JOIN_WORDS (seeded so
+    a given profile always reads the same way on re-render, matching
+    _pick()'s convention elsewhere in this module)."""
+    if not evidence_sentences:
+        return ""
+    cleaned = [_clean_evidence(e) for e in evidence_sentences]
+    rnd = random.Random(seed)
+    out = cleaned[0]
+    for e in cleaned[1:]:
+        out += " " + rnd.choice(_JOIN_WORDS) + _lowercase_first(e)
+    return out
+
+
+def _paragraph_from_traits(traits_list, lead_with_severity):
+    """Joins several traits' evidence into one paragraph body: the first
+    trait gets a severity-scaled lead-in (if lead_with_severity), every
+    later trait gets a transition connector instead of repeating that lead
+    -- prevents e.g. three dominant traits all opening with "This one's not
+    subtle" back to back. Connectors cycle by position (not seeded random)
+    so two ADJACENT traits never get the same one, which a random pick
+    could otherwise coincidentally produce."""
+    parts = []
+    for i, t in enumerate(traits_list):
+        ev = _join_evidence(t["evidence"], seed=t["label"])
+        if i == 0 and lead_with_severity:
+            parts.append(_severity_lead(t["score"]) + _lowercase_first(ev))
+        elif i == 0:
+            parts.append(ev)
+        else:
+            connector = _TRAIT_JOIN_WORDS[(i - 1) % len(_TRAIT_JOIN_WORDS)]
+            parts.append(connector + _lowercase_first(ev))
+    return " ".join(parts)
+
+
+def _and_join_bold(labels):
+    """['A'] -> '**A**'; ['A','B'] -> '**A** and **B**';
+    ['A','B','C'] -> '**A**, **B**, and **C**' (Oxford comma)."""
+    bolded = [f"**{label}**" for label in labels]
+    if len(bolded) == 1:
+        return bolded[0]
+    if len(bolded) == 2:
+        return f"{bolded[0]} and {bolded[1]}"
+    return ", ".join(bolded[:-1]) + f", and {bolded[-1]}"
+
+
+def investor_narrative(investor_profile):
+    """Turns behavioral_profile.investor_profile()'s trait scorecard into
+    flowing prose -- 2-3 paragraphs in the same second-person, evidence-
+    cited voice as the rest of this app's copy (every claim still traces
+    back to a real count/percentage from the evidence strings, nothing
+    added here is invented), instead of a bare scorecard + progress bars +
+    a dropdown someone has to click through to see the reasoning. Returns a
+    list of paragraph strings (app.py renders one st.markdown per
+    paragraph), or [] if there's nothing to profile.
+
+    Paragraph 1 covers the dominant pattern(s) (the ones investor_profile()
+    already flagged as dominant -- score x confidence > 0.15). Paragraph 2,
+    if there's anything left, covers secondary patterns that showed up but
+    didn't rise to "dominant." A closing paragraph carries the same
+    correlational-not-clinical caveat this section has always shown."""
+    if investor_profile is None or not investor_profile["traits"]:
+        return []
+
+    traits = investor_profile["traits"]
+    n_trades = investor_profile["n_trades"]
+    ranked = sorted(traits.values(), key=lambda v: v["score"] * v["confidence"], reverse=True)
+    dominant = [traits[k] for k in investor_profile["dominant"]]
+    if not dominant:
+        dominant = ranked[:1]
+    dominant_labels = {t["label"] for t in dominant}
+    secondary = [v for v in ranked if v["label"] not in dominant_labels and v["score"] * v["confidence"] > 0.08]
+
+    paragraphs = []
+
+    if len(dominant) == 1:
+        opener = f"The clearest pattern in this trade history is {_and_join_bold([dominant[0]['label']])}. "
+    else:
+        word = "Two patterns" if len(dominant) == 2 else "A few patterns"
+        opener = f"{word} dominate this trade history: {_and_join_bold([t['label'] for t in dominant])}. "
+    paragraphs.append(opener + _paragraph_from_traits(dominant, lead_with_severity=True))
+
+    if secondary:
+        names = _and_join_bold([t["label"] for t in secondary])
+        verb = "shows" if len(secondary) == 1 else "show"
+        lead = f"That's not the whole picture, though -- {names} {verb} up too, less dominant but still real. "
+        paragraphs.append(lead + _paragraph_from_traits(secondary, lead_with_severity=False))
+
+    trade_word = "trade" if n_trades == 1 else "trades"
+    paragraphs.append(
+        f"None of this is a clinical read on you -- these are behavioral signatures consistent with "
+        f"well-known biases, correlational patterns in the numbers, not proof of intent. Scores are "
+        f"down-weighted automatically when there isn't much trade history behind them, so a pattern "
+        f"with low confidence is a hint worth watching, not a verdict. This covers all {n_trades} "
+        f"closed {trade_word} in this upload."
+    )
+    return paragraphs
+
+
 def build_report(diagnosed, currency="₹"):
     """Full structure app.py renders: aggregate summary, plus every
     diagnosed trade (app.py sorts/displays these in a selectable table and

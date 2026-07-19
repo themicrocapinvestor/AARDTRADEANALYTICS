@@ -209,6 +209,7 @@ if st.button("Run the mirror", type="primary"):
     st.session_state["demo_skipped"] = skipped + skipped_extra
     st.session_state["demo_trigger_stats"] = trigger_stats
     st.session_state["demo_symbol_map"] = symbol_map
+    st.session_state["demo_benchmark"] = benchmark_daily
 
 report = st.session_state.get("demo_report")
 if report is None:
@@ -218,6 +219,7 @@ symbol_frames = st.session_state.get("demo_frames", {})
 skipped = st.session_state.get("demo_skipped", [])
 trigger_stats = st.session_state.get("demo_trigger_stats", {})
 symbol_map = st.session_state.get("demo_symbol_map", {})
+benchmark_daily = st.session_state.get("demo_benchmark")
 
 if skipped:
     # Skipped-symbol reasons are internal (no candle history etc.), not a
@@ -245,45 +247,95 @@ st.caption(
     "comparison above."
 )
 bt = summary["backtest"]
-b1, b2, b3 = st.columns(3)
-b1.metric("Avg return / trade", f"{bt['expectancy_pct']:+.1f}%",
-          help=f"The average price return per trade, gross -- excludes brokerage, taxes, and any "
-               f"other transaction costs. {bt['n_wins']} wins / {bt['n_losses']} losses out of "
-               f"{bt['n_trades']} trades.")
+b1, b2, b3, b4 = st.columns(4)
+b1.metric("Win rate", f"{bt['win_rate']:.0f}%",
+          help=f"{bt['n_wins']} wins / {bt['n_losses']} losses out of {bt['n_trades']} trades")
 b2.metric("Risk : Reward", f"1 : {bt['risk_reward']:.2f}" if bt["risk_reward"] else "—",
-          help=f"Avg win {bt['avg_win_pct']:+.1f}% vs. avg loss {bt['avg_loss_pct']:+.1f}%")
-b3.metric("Avg days held", f"{bt['avg_days_held']:.0f}",
+          help=f"Avg win {bt['avg_win_pct']:+.1f}% vs. avg loss {bt['avg_loss_pct']:+.1f}% -- a big "
+               f"ratio here doesn't mean a big average return if win rate is low; see Avg return/trade.")
+b3.metric("Avg return / trade", f"{bt['expectancy_pct']:+.1f}%",
+          help="Win rate x avg win, plus loss rate x avg loss -- the average price return per trade, "
+               "gross (excludes brokerage, taxes, and any other transaction costs). This is what "
+               "reconciles Win rate and Risk:Reward into one number.")
+b4.metric("Avg days held", f"{bt['avg_days_held']:.0f}",
           help=f"Range {bt['min_days_held']}-{bt['max_days_held']} days")
 
-st.markdown("### Your avg return per trade vs. a profit + stop-loss condition")
-st.caption(
-    "Pick one profit-taking condition and one stop-loss condition -- each trade is checked against "
-    "BOTH, and whichever fired first after entry decides the hypothetical exit. Compared against your "
-    "actual average return per trade (gross, excludes brokerage/costs). Descriptive, not a "
-    "recommendation."
-)
-profit_label_to_key = {label: key for key, label in exit_triggers.PROFIT_TRIGGERS}
-stop_label_to_key = {label: key for key, label in exit_triggers.STOP_LOSS_TRIGGERS}
-pc1, pc2 = st.columns(2)
-with pc1:
-    profit_label = st.selectbox("Profit condition", list(profit_label_to_key.keys()))
-with pc2:
-    stop_label = st.selectbox("Stop loss condition", list(stop_label_to_key.keys()))
+st.markdown("### Best & worst trades")
+st.caption("By your own return %, not by rupees left on the table -- the single best and worst "
+           "calls in this upload, full stop.")
+best_trades, worst_trades = mirror_narrative.top_bottom_trades(report["all_trades"], n=3)
 
-combined = exit_triggers.combined_portfolio_stats(
-    report["all_trades"], symbol_frames, profit_label_to_key[profit_label], stop_label_to_key[stop_label]
+
+def _trade_row(t):
+    return {
+        "Symbol": symbol_map.get(t["symbol"], t["symbol"]),
+        "Entry": t["entry_date"].date(), "Exit": t["exit_date"].date(),
+        "Return %": t["user_return_pct"], f"P&L ({currency})": t["pnl_rupees"],
+    }
+
+
+bt_col, wt_col = st.columns(2)
+with bt_col:
+    st.markdown("**Top 3**")
+    st.dataframe(
+        pd.DataFrame([_trade_row(t) for t in best_trades]), use_container_width=True, hide_index=True,
+        column_config={
+            "Return %": st.column_config.NumberColumn(format="%+.1f%%"),
+            f"P&L ({currency})": st.column_config.NumberColumn(format=f"{currency}%+,.0f"),
+        },
+    )
+with wt_col:
+    st.markdown("**Worst 3**")
+    st.dataframe(
+        pd.DataFrame([_trade_row(t) for t in worst_trades]), use_container_width=True, hide_index=True,
+        column_config={
+            "Return %": st.column_config.NumberColumn(format="%+.1f%%"),
+            f"P&L ({currency})": st.column_config.NumberColumn(format=f"{currency}%+,.0f"),
+        },
+    )
+
+st.markdown("### Best & worst months")
+st.caption(
+    "Trades grouped by exit month. Aggregate return is the plain average of your return % across "
+    "trades that closed in that month -- compared against NIFTY 500's own return over that same "
+    "calendar month (month-end vs. the prior month-end close), when Kite candle data for it was "
+    "available."
 )
-tc1, tc2 = st.columns(2)
-tc1.metric("Your actual avg return / trade", f"{bt['expectancy_pct']:+.1f}%",
-           help=f"Across all {bt['n_trades']} closed trades, gross (excludes brokerage/costs)")
-if combined["n_trades"]:
-    delta = round(combined["avg_return_pct"] - bt["expectancy_pct"], 1)
-    tc2.metric(f"If exited on: {profit_label} / {stop_label}", f"{combined['avg_return_pct']:+.1f}%",
-               delta=f"{delta:+.1f} pts",
-               help=f"Whichever fired first, based on the {combined['n_trades']} trade(s) where at least one did")
+best_months, worst_months = mirror_narrative.best_worst_months(
+    report["all_trades"], benchmark_daily, n=3
+)
+if not best_months:
+    st.info("Not enough closed trades to break down by month yet.")
 else:
-    tc2.metric(f"If exited on: {profit_label} / {stop_label}", "—",
-               help="Neither condition ever fired on any of your trades")
+    def _month_row(m):
+        return {
+            "Month": m["month_label"], "Trades": m["n_trades"],
+            "Aggregate return %": m["avg_return_pct"], f"Total P&L ({currency})": m["total_pnl_rupees"],
+            "NIFTY 500 return %": m["nifty_return_pct"],
+        }
+
+    bm_col, wm_col = st.columns(2)
+    with bm_col:
+        st.markdown("**Best 3 months**")
+        st.dataframe(
+            pd.DataFrame([_month_row(m) for m in best_months]), use_container_width=True, hide_index=True,
+            column_config={
+                "Aggregate return %": st.column_config.NumberColumn(format="%+.1f%%"),
+                f"Total P&L ({currency})": st.column_config.NumberColumn(format=f"{currency}%+,.0f"),
+                "NIFTY 500 return %": st.column_config.NumberColumn(format="%+.1f%%"),
+            },
+        )
+    with wm_col:
+        st.markdown("**Worst 3 months**")
+        st.dataframe(
+            pd.DataFrame([_month_row(m) for m in worst_months]), use_container_width=True, hide_index=True,
+            column_config={
+                "Aggregate return %": st.column_config.NumberColumn(format="%+.1f%%"),
+                f"Total P&L ({currency})": st.column_config.NumberColumn(format=f"{currency}%+,.0f"),
+                "NIFTY 500 return %": st.column_config.NumberColumn(format="%+.1f%%"),
+            },
+        )
+
 
 st.markdown("### Your recurring mistakes")
 freq = {humanize_tag(k): v for k, v in summary["mistake_frequency"].items() if k != "clean"}
@@ -439,40 +491,11 @@ else:
 st.markdown("## Investor Behavioral Profile")
 st.caption(
     "Covers every closed trade in this upload, computed purely from entry/exit timing, sizing, and how "
-    "exit signals were (or weren't) acted on. These are behavioral signatures consistent with well-known "
-    "biases, not a clinical read on you -- and scores are down-weighted when trade count is small."
+    "exit signals were (or weren't) acted on."
 )
 investor_profile = behavioral_profile.investor_profile(report["all_trades"], symbol_frames, trades)
 if investor_profile is None or not investor_profile["traits"]:
     st.info("Not enough patterns in this trade history to profile yet.")
 else:
-    ranked_traits = sorted(
-        investor_profile["traits"].values(), key=lambda v: v["score"] * v["confidence"], reverse=True
-    )
-
-    if investor_profile["dominant"]:
-        st.markdown("#### Dominant pattern(s)")
-        dominant_traits = [investor_profile["traits"][k] for k in investor_profile["dominant"]]
-        for col, v in zip(st.columns(len(dominant_traits)), dominant_traits):
-            col.metric(v["label"], f"{v['score']:.2f}", help=f"Confidence {v['confidence']:.2f}")
-
-    st.markdown("#### Full scorecard")
-    scorecard_df = pd.DataFrame([
-        {"Trait": v["label"], "Score": v["score"], "Confidence": v["confidence"]} for v in ranked_traits
-    ])
-    st.dataframe(
-        scorecard_df, use_container_width=True, hide_index=True,
-        column_config={
-            "Score": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.2f"),
-            "Confidence": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.2f"),
-        },
-    )
-
-    st.markdown("#### Evidence")
-    trait_label = st.selectbox(
-        "See the trades behind a trait", [v["label"] for v in ranked_traits], key="behavioral_trait_select"
-    )
-    selected_trait = next(v for v in ranked_traits if v["label"] == trait_label)
-    st.caption(f"Score {selected_trait['score']:.2f} · Confidence {selected_trait['confidence']:.2f}")
-    for e in demo_anonymize.anonymize_bullets(selected_trait["evidence"], symbol_map):
-        st.markdown(f"- {e}")
+    for p in demo_anonymize.anonymize_bullets(mirror_narrative.investor_narrative(investor_profile), symbol_map):
+        st.markdown(p)
