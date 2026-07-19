@@ -95,8 +95,3 @@ affiliated with, endorsed by, or sponsored by Zerodha or Kite Connect.
 MIT License -- see [LICENSE](LICENSE). You're free to use, modify, and
 redistribute this code, including commercially, as long as the license
 notice is kept.
-
-## About Me
-
-Hi, my name is Ayush. 
-I am available on themicrocapinvestor@gmail.com

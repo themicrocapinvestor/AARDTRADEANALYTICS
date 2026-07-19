@@ -97,6 +97,8 @@ _CSS_RULES = [
     "[data-testid=\"stFileUploaderDropzone\"] * { color: var(--text) !important; }",
     "[data-testid=\"stFileUploaderDropzone\"] svg { fill: var(--muted) !important; }",
     "[data-testid=\"stFileUploaderDropzoneInstructions\"] { color: var(--text) !important; }",
+    "[data-testid=\"stFileUploaderDropzone\"][data-testid=\"stFileUploaderDropzone\"] { background: var(--surface) !important; background-color: var(--surface) !important; }",
+    "[data-testid=\"stFileUploader\"] [data-testid=\"stFileUploaderDropzone\"] > div, [data-testid=\"stFileUploader\"] [data-testid=\"stFileUploaderDropzone\"] > section { background: var(--surface) !important; background-color: var(--surface) !important; }",
     "[data-testid^=\"stBaseButton\"], [data-testid=\"stFileUploader\"] button, [data-testid=\"stDownloadButton\"] button { background: var(--surface) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }",
     "[data-testid^=\"stBaseButton\"]:hover, [data-testid=\"stFileUploader\"] button:hover, [data-testid=\"stDownloadButton\"] button:hover { background: var(--loss) !important; color: var(--bg) !important; border-color: var(--loss) !important; }",
     "[data-testid=\"stTextInput\"] input, [data-testid=\"stNumberInput\"] input, [data-testid=\"stSelectbox\"] div[data-baseweb=\"select\"] > div, [data-testid=\"stTextArea\"] textarea { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }",
