@@ -260,6 +260,21 @@ b3.metric("Avg return / trade", f"{bt['expectancy_pct']:+.1f}%",
 b4.metric("Avg days held", f"{bt['avg_days_held']:.0f}",
           help=f"Range {bt['min_days_held']}-{bt['max_days_held']} days")
 
+st.markdown("### Your equity curve vs. the benchmark")
+st.caption(
+    "Cumulative return %, trade by trade, rebased to 0% at your first exit. This is a running sum "
+    "of each trade's return -- not compounded -- to stay consistent with every other return number "
+    "in this report."
+)
+st.plotly_chart(
+    chart.equity_curve_chart(report["all_trades"], benchmark_daily, benchmark_label="NIFTY 500"),
+    use_container_width=True,
+)
+
+st.markdown("### Holding period: winners vs. losers")
+st.caption("The classic tell -- do you cut winners short and let losers run, or the reverse?")
+st.plotly_chart(chart.holding_period_chart(report["all_trades"]), use_container_width=True)
+
 st.markdown("### Best & worst trades")
 st.caption("By your own return %, not by rupees left on the table -- the single best and worst "
            "calls in this upload, full stop.")
@@ -335,6 +350,10 @@ else:
                 "NIFTY 500 return %": st.column_config.NumberColumn(format="%+.1f%%"),
             },
         )
+
+    st.markdown("**Every month, at a glance**")
+    all_months = mirror_narrative.monthly_returns(report["all_trades"], benchmark_daily)
+    st.plotly_chart(chart.monthly_heatmap(all_months), use_container_width=True)
 
 
 st.markdown("### Your recurring mistakes")

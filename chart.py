@@ -294,3 +294,134 @@ def mistake_frequency_chart(freq):
         yaxis=dict(autorange="reversed"),
     )
     return fig
+
+
+_HEATMAP_MONTH_NAMES = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+
+def monthly_heatmap(months):
+    """GitHub-contributions-style grid: one row per year, one column per
+    calendar month, cell shaded red/teal by that month's aggregate return %.
+    `months` is the full (unsliced) output of mirror_narrative.monthly_returns
+    -- every month with at least one closed trade, not just best/worst N.
+    Months with no trades render as blank grey cells rather than 0% (0% is a
+    real, plottable outcome; "no data" is not the same thing)."""
+    by_key = {m["sort_key"]: m for m in months}
+    years = sorted({int(k[:4]) for k in by_key}, reverse=True)
+
+    z, text, customdata = [], [], []
+    for y in years:
+        row_z, row_text, row_cd = [], [], []
+        for mo in range(1, 13):
+            m = by_key.get(f"{y}-{mo:02d}")
+            if m is None:
+                row_z.append(None)
+                row_text.append("")
+                row_cd.append("No closed trades")
+            else:
+                row_z.append(m["avg_return_pct"])
+                row_text.append(f'{m["avg_return_pct"]:+.1f}%')
+                row_cd.append(f'{m["n_trades"]} trade(s)')
+        z.append(row_z)
+        text.append(row_text)
+        customdata.append(row_cd)
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=_HEATMAP_MONTH_NAMES, y=[str(y) for y in years],
+        text=text, texttemplate="%{text}", textfont=dict(size=12, color=INK),
+        customdata=customdata,
+        hovertemplate="%{y} %{x}: %{text}<br>%{customdata}<extra></extra>",
+        colorscale=[[0, LOSS], [0.5, SURFACE], [1, DISCIPLINE]],
+        zmid=0, showscale=True,
+        colorbar=dict(title="Return %", tickfont=dict(color=INK), title_font=dict(color=INK)),
+        xgap=3, ygap=3,
+    ))
+    fig.update_layout(
+        template="plotly_dark",
+        height=max(180, 70 * len(years) + 60),
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK, family="IBM Plex Sans, sans-serif", size=13),
+        xaxis=dict(side="top", showgrid=False),
+        yaxis=dict(showgrid=False, autorange="reversed"),
+    )
+    return fig
+
+
+def holding_period_chart(diagnosed):
+    """Two bars: average days held for winning trades vs. losing trades --
+    the classic "cut winners short, let losers run" tell made visible in one
+    glance instead of buried in a single averaged "Avg days held" metric."""
+    wins = [d["days_in_trade"] for d in diagnosed if d["pnl_rupees"] > 0]
+    losses = [d["days_in_trade"] for d in diagnosed if d["pnl_rupees"] <= 0]
+    avg_win = round(sum(wins) / len(wins), 1) if wins else 0.0
+    avg_loss = round(sum(losses) / len(losses), 1) if losses else 0.0
+
+    fig = go.Figure(go.Bar(
+        x=[avg_win, avg_loss], y=["Winning trades", "Losing trades"], orientation="h",
+        marker_color=[DISCIPLINE, LOSS],
+        text=[f"{avg_win:.1f} days", f"{avg_loss:.1f} days"], textposition="outside",
+        customdata=[len(wins), len(losses)],
+        hovertemplate="%{y}: %{x:.1f} days avg, %{customdata} trade(s)<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_dark",
+        height=220,
+        margin=dict(l=10, r=40, t=10, b=10),
+        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK, family="IBM Plex Sans, sans-serif", size=13),
+        xaxis=dict(title="Avg days held", gridcolor=GRID),
+        yaxis=dict(autorange="reversed"),
+        showlegend=False,
+    )
+    return fig
+
+
+def equity_curve_chart(diagnosed, benchmark_daily=None, benchmark_label="NIFTY 500"):
+    """Cumulative return %, portfolio vs. benchmark, both rebased to 0% at
+    the first trade's exit date. Portfolio curve is a running SUM of each
+    trade's user_return_pct in exit-date order -- plain addition, same
+    convention as backtest_stats' expectancy_pct and monthly_returns'
+    avg_return_pct elsewhere in this app, not compounded -- so this stays
+    consistent with every other return number shown, rather than introducing
+    a second, incompatible math convention just for this one chart."""
+    ordered = sorted(diagnosed, key=lambda d: d["exit_date"])
+    dates = [d["exit_date"] for d in ordered]
+    cum = []
+    running = 0.0
+    for d in ordered:
+        running += d["user_return_pct"]
+        cum.append(running)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dates, y=cum, mode="lines", name="Your portfolio", line=dict(color=DISCIPLINE, width=2, shape="hv"),
+    ))
+
+    if benchmark_daily is not None and not benchmark_daily.empty and dates:
+        bench = benchmark_daily[benchmark_daily.index >= pd.Timestamp(dates[0])]
+        bench = bench[bench.index <= pd.Timestamp(dates[-1])]
+        if not bench.empty:
+            base = bench["close"].iloc[0]
+            bench_cum = (bench["close"] / base - 1) * 100
+            fig.add_trace(go.Scatter(
+                x=bench.index, y=bench_cum.values, mode="lines", name=benchmark_label,
+                line=dict(color=MUTED, width=2, dash="dot"),
+            ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=380,
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK, family="IBM Plex Sans, sans-serif", size=13),
+        xaxis=dict(gridcolor=GRID),
+        yaxis=dict(gridcolor=GRID, title="Cumulative return %"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
+                    font=dict(size=12, color=INK), bgcolor="rgba(27,30,39,0.85)",
+                    bordercolor=GRID, borderwidth=1),
+        hovermode="x unified",
+    )
+    return fig

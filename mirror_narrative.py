@@ -309,14 +309,22 @@ def _benchmark_monthly_returns(benchmark_daily):
     return result
 
 
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
 def monthly_returns(diagnosed, benchmark_daily=None):
     """Groups closed trades by EXIT month (that's when the P&L actually
     landed) and returns one dict per month that had at least one trade,
-    sorted chronologically: {month_label ('YYYY-MM'), n_trades,
-    avg_return_pct (plain mean of user_return_pct for trades exiting that
-    month -- same convention as backtest_stats' expectancy_pct, just
-    sliced by month), total_pnl_rupees, nifty_return_pct (None if no
-    benchmark data was available for that month)}."""
+    sorted chronologically: {month_label (e.g. "September '26", for
+    display), sort_key ('YYYY-MM', chronological sort only -- not for
+    display), n_trades, avg_return_pct (plain mean of user_return_pct for
+    trades exiting that month -- same convention as backtest_stats'
+    expectancy_pct, just sliced by month), total_pnl_rupees,
+    nifty_return_pct (None if no benchmark data was available for that
+    month)}."""
     buckets = {}
     for d in diagnosed:
         key = (d["exit_date"].year, d["exit_date"].month)
@@ -327,13 +335,14 @@ def monthly_returns(diagnosed, benchmark_daily=None):
     months = []
     for (y, m), trades in buckets.items():
         months.append({
-            "month_label": f"{y}-{m:02d}",
+            "month_label": f"{_MONTH_NAMES[m - 1]} '{y % 100:02d}",
+            "sort_key": f"{y}-{m:02d}",
             "n_trades": len(trades),
             "avg_return_pct": round(sum(t["user_return_pct"] for t in trades) / len(trades), 1),
             "total_pnl_rupees": round(sum(t["pnl_rupees"] for t in trades), 2),
             "nifty_return_pct": bench_monthly.get((y, m)),
         })
-    months.sort(key=lambda x: x["month_label"])
+    months.sort(key=lambda x: x["sort_key"])
     return months
 
 

@@ -42,13 +42,14 @@ timeliness, merchantability, or fitness for a particular purpose, express or imp
 
 **Not affiliated.** This tool is an independent, unofficial project. It is not
 affiliated with, endorsed by, sponsored by, or in any way officially connected to
-Zerodha Broking Ltd., Kite Connect, NSE, BSE, or any other exchange, broker, data
-provider, or index provider referenced in its output.
+Zerodha Broking Ltd., Kite Connect, NSE, BSE, Tiingo, NASDAQ, NYSE, S&P Dow
+Jones Indices, or any other exchange, broker, data provider, or index provider
+referenced in its output.
 
-**Your data.** Your uploaded Tradebook/trade file(s) and your Kite credentials
-are used only within your own active session to generate this analysis. This
-tool does not sell your data to third parties. If you deploy or share this app
-yourself, you are
+**Your data.** Your uploaded Tradebook/trade file(s) and your Kite credentials or
+Tiingo API key are used only within your own active session to generate
+this analysis. This tool does not sell your data to third parties. If you deploy
+or share this app yourself, you are
 responsible for how you configure storage, logging, and access for your own
 deployment.
 
@@ -95,9 +96,30 @@ _CSS_TEMPLATE = """
 <style>
 %(root)s
 
-.stApp, [data-testid="stAppViewContainer"] { background: var(--bg); color: var(--ink); font-family: 'IBM Plex Sans', sans-serif; }
-[data-testid="stHeader"] { background: transparent; }
+html, body,
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+[data-testid="stMainBlockContainer"], .main .block-container,
+[data-testid="stSidebar"], [data-testid="stSidebarContent"],
+[data-testid="stBottomBlockContainer"] {
+  background: var(--bg) !important; color: var(--ink) !important; font-family: 'IBM Plex Sans', sans-serif;
+}
+[data-testid="stHeader"] { background: transparent !important; }
 .stApp p, .stApp li, .stApp label { font-family: 'IBM Plex Sans', sans-serif; }
+
+/* Native widgets that paint their own background instead of inheriting it */
+[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section {
+  background: var(--surface) !important; border-color: var(--border) !important; color: var(--ink) !important;
+}
+[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+[data-testid="stTextArea"] textarea {
+  background: var(--surface) !important; color: var(--ink) !important; border-color: var(--border) !important;
+}
+[data-testid="stCheckbox"] label span, [data-testid="stRadio"] label span,
+[data-testid="stWidgetLabel"] p { color: var(--ink) !important; }
+[data-testid="stAlert"] { background: var(--surface) !important; color: var(--ink) !important; }
+[data-testid="stCaptionContainer"] { color: var(--muted) !important; }
+[data-testid="stMarkdownContainer"] { color: var(--ink); }
 /* Never touch bare <span> font-family -- Streamlit renders its own icon
    glyphs (expander chevrons, spinner icons) as ligature text inside plain
    <span> elements via a Material Symbols font; overriding it site-wide
