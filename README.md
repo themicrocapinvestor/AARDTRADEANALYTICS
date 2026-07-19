@@ -95,3 +95,7 @@ affiliated with, endorsed by, or sponsored by Zerodha or Kite Connect.
 MIT License -- see [LICENSE](LICENSE). You're free to use, modify, and
 redistribute this code, including commercially, as long as the license
 notice is kept.
+
+## About Vide Coder
+
+Hi, my name is Ayush
