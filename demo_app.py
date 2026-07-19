@@ -29,10 +29,7 @@ from mirror_narrative import humanize_tag
 
 st.set_page_config(page_title="AARD Tradebook Analytics -- Demo", page_icon="\U0001F576", layout="wide")
 
-_toggle_col = st.columns([6, 1])[1]
-with _toggle_col:
-    theme_mode = theme.mode_toggle()
-theme.inject(theme_mode)
+theme.inject()
 
 currency = "₹"
 
@@ -45,7 +42,7 @@ st.html(
         "Same real analysis as the main app, run with your own Kite login and your own "
         "tradebook -- but every ticker is shown as STOCK#1, STOCK#2, etc. Safe to record or "
         "share screenshots from.",
-        "ANONYMIZED DEMO", "neutral", mode=theme_mode,
+        "ANONYMIZED DEMO", "neutral",
     )
 )
 st.caption(

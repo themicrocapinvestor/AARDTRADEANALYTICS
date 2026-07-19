@@ -29,10 +29,7 @@ from mirror_narrative import humanize_tag
 
 st.set_page_config(page_title="AARD Tradebook Analytics", page_icon="\U0001FA9E", layout="wide")
 
-_toggle_col = st.columns([6, 1])[1]
-with _toggle_col:
-    theme_mode = theme.mode_toggle()
-theme.inject(theme_mode)
+theme.inject()
 
 currency = "₹"
 
@@ -44,7 +41,7 @@ st.html(
         "AARD Tradebook Analytics",
         "Upload your Zerodha Tradebook. Pick a trade below and see the full technical "
         "picture -- what carried it, what broke it, and what actually happened next.",
-        "TRADEBOOK ANALYTICS", "neutral", mode=theme_mode,
+        "TRADEBOOK ANALYTICS", "neutral",
     )
 )
 st.caption(

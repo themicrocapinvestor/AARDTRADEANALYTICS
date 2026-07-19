@@ -55,34 +55,30 @@ its use or from any reliance placed on its output. By using this tool, you accep
 these terms; if you do not accept them, do not use it.
 """
 
-# Same accent colors (loss/discipline) in both modes for brand consistency;
-# only bg/surface/ink/muted/border flip. Light mode's accents are darkened a
-# touch from the dark-mode hex so they still meet contrast against a white
-# surface (the dark-mode reds/teals are tuned to pop against near-black).
-PALETTES = {
-    "dark": {
-        "bg": "#12141A", "surface": "#1B1E27", "ink": "#E9E4D6",
-        "muted": "#78808F", "loss": "#E1573F", "discipline": "#4FBFA6",
-        "border": "#2C303B",
-    },
-    "light": {
-        "bg": "#F7F5F0", "surface": "#FFFFFF", "ink": "#1B1E27",
-        "muted": "#5B6270", "loss": "#C4402A", "discipline": "#2E8B74",
-        "border": "#DDD8CC",
-    },
+# One fixed dark theme, no toggle -- a prior light/dark toggle relied on
+# CSS alone to fight Streamlit's own native theme layer (config.toml) and
+# never reliably won on every widget/container across Streamlit versions;
+# a single hardcoded theme with no second state to fight has nothing left
+# to fall back to white on. --ink is the cream used for headers/titles;
+# --text is plain white for body copy (the two are deliberately different
+# so headers still stand out against paragraph text).
+PALETTE = {
+    "bg": "#12141A", "surface": "#1B1E27", "ink": "#E9E4D6", "text": "#FFFFFF",
+    "muted": "#B7BCC6", "loss": "#E1573F", "discipline": "#4FBFA6", "border": "#2C303B",
 }
 
-_ROOT_TEMPLATE = """:root {
+_ROOT_CSS = """:root {
   --bg: %(bg)s;
   --surface: %(surface)s;
   --ink: %(ink)s;
+  --text: %(text)s;
   --muted: %(muted)s;
   --loss: %(loss)s;
   --discipline: %(discipline)s;
   --border: %(border)s;
-}"""
+}""" % PALETTE
 
-_CSS_TEMPLATE = """
+_CSS = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -92,26 +88,25 @@ html, body,
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
 [data-testid="stMainBlockContainer"], .main .block-container,
 [data-testid="stSidebar"], [data-testid="stSidebarContent"],
-[data-testid="stBottomBlockContainer"] {
-  background: var(--bg) !important; color: var(--ink) !important; font-family: 'IBM Plex Sans', sans-serif;
+[data-testid="stBottomBlockContainer"], [data-testid="stHeader"] {
+  background: var(--bg) !important; color: var(--text) !important; font-family: 'IBM Plex Sans', sans-serif;
 }
-[data-testid="stHeader"] { background: transparent !important; }
-.stApp p, .stApp li, .stApp label { font-family: 'IBM Plex Sans', sans-serif; }
+.stApp p, .stApp li, .stApp label { font-family: 'IBM Plex Sans', sans-serif; color: var(--text); }
 
 /* Native widgets that paint their own background instead of inheriting it */
 [data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section {
-  background: var(--surface) !important; border-color: var(--border) !important; color: var(--ink) !important;
+  background: var(--surface) !important; border-color: var(--border) !important; color: var(--text) !important;
 }
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
 [data-testid="stTextArea"] textarea {
-  background: var(--surface) !important; color: var(--ink) !important; border-color: var(--border) !important;
+  background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important;
 }
 [data-testid="stCheckbox"] label span, [data-testid="stRadio"] label span,
-[data-testid="stWidgetLabel"] p { color: var(--ink) !important; }
-[data-testid="stAlert"] { background: var(--surface) !important; color: var(--ink) !important; }
+[data-testid="stWidgetLabel"] p { color: var(--text) !important; }
+[data-testid="stAlert"] { background: var(--surface) !important; color: var(--text) !important; }
 [data-testid="stCaptionContainer"] { color: var(--muted) !important; }
-[data-testid="stMarkdownContainer"] { color: var(--ink); }
+[data-testid="stMarkdownContainer"] { color: var(--text); }
 /* Never touch bare <span> font-family -- Streamlit renders its own icon
    glyphs (expander chevrons, spinner icons) as ligature text inside plain
    <span> elements via a Material Symbols font; overriding it site-wide
@@ -129,15 +124,15 @@ html, body,
 [data-testid="stMetric"] {
   background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem;
 }
-[data-testid="stMetricLabel"] { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; }
-[data-testid="stMetricValue"] { font-family: 'IBM Plex Mono', monospace; }
+[data-testid="stMetricLabel"] { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--muted); }
+[data-testid="stMetricValue"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }
 
 [data-testid="stExpander"] { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 /* Explicit text color on the expander's clickable header -- without this it
    inherited a low-contrast default that was only readable on hover. */
-[data-testid="stExpander"] summary, [data-testid="stExpander"] summary p { color: var(--ink) !important; }
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary p { color: var(--text) !important; }
 
-[data-testid="stDataFrameResizable"] { color: var(--ink); }
+[data-testid="stDataFrameResizable"] { color: var(--text); }
 
 .stButton>button {
   font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.06em;
@@ -145,31 +140,19 @@ html, body,
 }
 .stButton>button:hover { background: var(--loss); color: var(--bg); border-color: var(--loss); }
 
-[data-testid="stDataFrame"] { font-family: 'IBM Plex Mono', monospace; }
+[data-testid="stDataFrame"] { font-family: 'IBM Plex Mono', monospace; color: var(--text); }
 
 :focus-visible { outline: 2px solid var(--discipline); outline-offset: 2px; }
 </style>
-"""
+""" % {"root": _ROOT_CSS}
 
 
-def mode_toggle():
-    """Renders the Dark/Light mode toggle and returns 'dark' or 'light'.
-    Call this BEFORE inject() (and before banner()) so the CSS/banner can be
-    built for whichever mode is selected. Streamlit remembers the user's
-    choice across reruns via the widget's own key -- value= only sets the
-    first-ever default."""
-    is_dark = st.toggle("Dark mode", value=True, key="theme_dark_mode")
-    return "dark" if is_dark else "light"
-
-
-def inject(mode="dark"):
+def inject():
     # st.html(), not st.markdown(unsafe_allow_html=True) -- markdown() runs
     # content through Streamlit's markdown parser first, which mangles a
     # multi-line <style> block (blank lines, /* comments */) into partly-
     # literal text instead of passing it through untouched.
-    palette = PALETTES.get(mode, PALETTES["dark"])
-    root_css = _ROOT_TEMPLATE % palette
-    st.html(_CSS_TEMPLATE % {"root": root_css})
+    st.html(_CSS)
 
 
 def _tilt(seed):
@@ -177,14 +160,13 @@ def _tilt(seed):
     return (h % 9) - 4
 
 
-def stamp(text, kind="loss", seed=None, mode="dark"):
+def stamp(text, kind="loss", seed=None):
     """A single, fully self-contained inline-styled badge -- deliberately
     doesn't depend on the external <style> block (a separate st.html() call
     from a different fragment wasn't reliably sharing styles in practice),
     so this renders correctly no matter what else is on the page."""
-    palette = PALETTES.get(mode, PALETTES["dark"])
-    color = {"loss": palette["loss"], "discipline": palette["discipline"], "neutral": palette["muted"]}.get(
-        kind, palette["muted"]
+    color = {"loss": PALETTE["loss"], "discipline": PALETTE["discipline"], "neutral": PALETTE["muted"]}.get(
+        kind, PALETTE["muted"]
     )
     tilt = _tilt(seed or text)
     style = (
@@ -196,18 +178,17 @@ def stamp(text, kind="loss", seed=None, mode="dark"):
     return f'<span style="{style}">{text}</span>'
 
 
-def banner(title_html, subtitle, stamp_text, stamp_kind, mode="dark"):
-    palette = PALETTES.get(mode, PALETTES["dark"])
+def banner(title_html, subtitle, stamp_text, stamp_kind):
     style = (
-        f"background:{palette['surface']};border:1px solid {palette['border']};border-radius:8px;"
+        f"background:{PALETTE['surface']};border:1px solid {PALETTE['border']};border-radius:8px;"
         "padding:1.4rem 1.6rem;display:flex;flex-wrap:wrap;align-items:center;"
         "justify-content:space-between;gap:1rem;margin-bottom:1.2rem;font-family:'IBM Plex Sans',sans-serif;"
     )
     return (
         f'<div style="{style}">'
         f'<div><h1 style="margin:0 0 0.2rem 0;font-family:\'Archivo Narrow\',sans-serif;'
-        f'text-transform:uppercase;letter-spacing:0.04em;font-weight:700;color:{palette["ink"]};">{title_html}</h1>'
-        f'<p style="margin:0;color:{palette["muted"]};font-size:0.95rem;">{subtitle}</p></div>'
-        f'{stamp(stamp_text, stamp_kind, seed="banner", mode=mode)}'
+        f'text-transform:uppercase;letter-spacing:0.04em;font-weight:700;color:{PALETTE["ink"]};">{title_html}</h1>'
+        f'<p style="margin:0;color:{PALETTE["muted"]};font-size:0.95rem;">{subtitle}</p></div>'
+        f'{stamp(stamp_text, stamp_kind, seed="banner")}'
         '</div>'
     )
